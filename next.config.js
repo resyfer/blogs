@@ -3,6 +3,8 @@ const withNextra = require('nextra')({
     themeConfig: './theme.config.jsx',
 })
 
+const isProduction = process.env.NODE_ENV === "production";
+const assetPrefix = isProduction ? "/blogs" : "";
 
 module.exports = {
     ...withNextra(),
@@ -10,4 +12,6 @@ module.exports = {
     images: {
         unoptimized: true,
     },
+    assetPrefix,
+    basePath: assetPrefix,
 }
