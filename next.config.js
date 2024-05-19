@@ -12,6 +12,9 @@ module.exports = {
     images: {
         unoptimized: true,
     },
+    reactStrictMode: true,
+    swcMinify: true,
+    trailingSlash: true,
     assetPrefix,
     basePath: assetPrefix,
 }
