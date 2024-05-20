@@ -1,4 +1,6 @@
-import { Callout, Card } from 'nextra/components'
+import { Cards, Callout, Card } from 'nextra/components'
+
+export let parttwo = "./intro_p2";
 
 # Introduction Part I | mnemofs
 
@@ -8,7 +10,7 @@ So, designing and implementing a file system...a daunting task, and very overwhe
 
 Non-volatile storages like hard disk drives (HDDs), Solid State Drives (SSDs), Compact Disks (CDs), Pen Drives, NAND Flash Devices, etc. are basically entire arrays that you can use to store anything.
 
-What makes it different from arrays in your Random Access Memory (RAM)? Many things. But most important of them is that it is non-volatile. This means that if something is stored in it, it will stay on it even if power is no longer supplied to the device. As an additional bonus, as far as storage mediums that exist till date go, if you store even a byte at a location, say, `x`, then it will be at `x` unless deleted explicitly.
+What makes it different from arrays in your Random Access Memory (RAM)? Many things. But most important of them is that it is non-volatile. This means that if something is stored in it, it will stay on it even if power is no longer supplied to the device. As an additional bonus, as far as storage mediums that exist till date go, if you store even a byte at a location, say, `x`, then it will be at `x` unless deleted explicitly (or some unexpected event can modify your storage, but more about it later!).
 
 Another difference is that, usually with an operating system (OS) running on your device, in RAM, you can not _really_ specify where you want a data to be stored in terms of absolute postition in the device. If you try to write, say a byte, at position `x`, it needs to be within the allowed locations by the kernel of the OS. Without getting too much into it here as it is out of scope, if you do not write within the confines specified, you get hit with bad karma in the form of `Segmentation fault (core dumped)`.
 
@@ -16,7 +18,7 @@ Another difference is that, usually with an operating system (OS) running on you
 There might be people trying to say you can not do that to a non-volatile device running on an OS as a user either blah blah, while others will counter it with their own written kernel module to do it but those are technicalities, and it will only result in confusion.
 </Callout>
 
-Thus, having established that they are different, we'll be calling volatile memory (primary memory) like RAM as memory, and non-volatile memory (or secondary memory) like HDDs, etc. as storage. Storage is slower than memory, but is cheaper per byte. Adding the advantage of non-volatile nature of storage shows you why it's such a popular medium of storing things.
+Thus, having established that they are different, we'll be calling volatile memory (primary memory) like RAM as memory, and non-volatile memory (or secondary memory) like HDDs, etc. as storage. Storage is slower than memory, but it is also cheaper per byte. Adding the advantage of non-volatile nature of storage shows you why it's such a popular medium of storing things.
 
 In of itself, storage seems like a very good thing...but it is a fox in sheep's clothing. It can go horribly wrong if not used properly. In fact, the false sense of security of having your data *persist* can make the shock even bigger if you can not access your data for whatever reason due to improper use.
 
@@ -47,17 +49,21 @@ So, some developers take that pain away from you onto their shoulders, and bring
 
 ### File System components
 
-File systems have a lot of components, which of course, have names. Like a car, some of them are very much visible to a user and they are aware of their presence, while a others are kept under-the-hood. These components are called file system objects (fs objects).
+File systems have a lot of components. Like a car, some of them are very much visible to a user and they are aware of their presence, while the others are kept under-the-hood. These components are called file system objects (fs objects).
 
-Some of the famous ones are explained below.
+Also like the parts of a car, these fs objects have different names depending on whom you ask. We'll stick to Linux (/ Unix / POSIX) terminology here, but at the end it is just a name.
+
+We'll go through some of the very common ones below, while we keep others for later exploration as we delve deeper into flie systems.
 
 #### File [#file]
 
 In a traditional sense, any collective piece of information that is part of one entity is one file. Like, a photo. One entire entity. It is a very loose definition. What if you cropped an image into 4 pieces and kept them separately? You do you, no judgement.
 
-Take it like a collection of information you want together, such that programs can work on the entire thing together. An image viewer can show you an entire image in one go if you keep all of it together. A video player can play your entire movie in one go if kept in one piece. And so on.
+Take it like a collection of information that you want to be kept together, such that programs can work on the entire thing together. An image viewer can show you an entire image in one go if you keep all of it together. A video player can play your entire movie in one go if kept in one piece. And so on.
 
-They are analogous to one single paper, or multiple papers (usually seen in photos of offices from a time as old as the ice age) that are kept together as they belong to the same topic.
+They are analogous to a single paper, or multiple papers that are kept together in thing called a file (usually seen in the *old* photos of offices from a time close to the ice age) as they belong to the same topic.
+
+![file](https://res.cloudinary.com/dbzi2yvvc/image/upload/w_250/v1716193039/71OPhvMBuRL_ywhdnw.jpg)
 
 #### Folders / Directories / Drawers [#directory]
 
@@ -71,9 +77,11 @@ etc.
 
 #### Symbolic Links (symlinks) / Shortcuts [#symlinks]
 
-Suppose you have a file in a directory that is very deep in a hierarchical system of directories. But there's this folder called "Desktop" in which, if files are kept, will be shown...on your Desktop (🤯). Now, keeping everything in the desktop would not make sense, and that file is happy where it is. And you're mostly happy with where it is as well. But you need it on your Desktop as well.
+Suppose you have a file in a directory that is very deep in a hierarchical system of directories. But suppose there's this folder called "My Desktop" in which, if files are kept, will be shown on...your Desktop (🤯). Now, keeping everything on your Desktop would not make sense, and that file is happy where it is. And you're mostly happy with where it is as well. But you need it on your Desktop as well.
 
-Well, copy it, duh. But then updating one does not update the other. Thus, symlinks. They are a type of file which points to the location of another file. There are two types of symlinks, but technicalities.
+Well, copy it, duh! **But** updating one does not update the other. Thus, came symlinks. They are a type of file which points to the location of another file. There are two types of symlinks, but technicalities.
+
+Symlinks *might* not have universal support as they might not be considered essential for the target audience of the OS, but most major general purpose OSes do support them.
 
 #### Inodes
 
@@ -81,9 +89,16 @@ Files usually have two types of data associated with them. Their content, and th
 
 These contain information like the file's name, their owner (who created it, or who owns it, etc. in a multi-user environment), their creation date, their last modification date, their last access date, their size, and so on. These are stored as another fs object called an inode.
 
+Inodes are very much optional too, and it depends on the file system on how they want to manage the metadata.
 
 ## Conclusion
 
-So, we glanced over the basic knowledge required to start learning about file systems. The fun and games end here, and in [Part 2](../coming_soon), it's time to dive into the depths of file systems, and file system development.
+So, we glanced over the basic knowledge required to start learning about file systems. The fun and games end here, and in [Part II]({parttwo}), it's time to dive into the depths of file systems, and file system development.
 
-<Card icon="❱ " title="Part II" href="../coming_soon" />
+
+---
+
+<Cards>
+<Card icon="" title="" href="" />
+<Card icon="❱&emsp;" title="Part II" href={parttwo} />
+</Cards>
