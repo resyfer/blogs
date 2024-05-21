@@ -1,4 +1,3 @@
-import Script from "next/script"
 
 export default {
   footer: <p>MIT 2024 © resyfer.</p>,
@@ -9,8 +8,8 @@ export default {
       )}
       {meta.tag && <meta name="keywords" content={meta.tag} />}
       {meta.author && <meta name="author" content={meta.author} />}
-      <Script async src="https://www.googletagmanager.com/gtag/js?id=G-HFNGDFK1PN"></Script>
-      <Script>
+      <script async src="https://www.googletagmanager.com/gtag/js?id=G-HFNGDFK1PN"></script>
+      <script>
         {`
         window.dataLayer = window.dataLayer || [];
         function gtag(){dataLayer.push(arguments);}
@@ -18,7 +17,7 @@ export default {
 
         gtag('config', 'G-HFNGDFK1PN');
         `}
-      </Script>
+      </script>
 
     </>
   ),
