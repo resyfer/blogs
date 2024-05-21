@@ -1,11 +1,11 @@
 import { Cards, Card } from 'nextra/components'
 
-export let partthree = "../coming_soon";
-export let partone = "./intro_p1";
+export let prev = "./intro_p1";
+export let next = "./intro_p3";
 
 # Introduction Part II | mnemofs
 
-We'll dive into a incremental explanation of various concepts involved with file systems and operating systems. It dives into a lot of "suppose" and "what ifs" to try and get you the sense of the problems that lurk in plain sight. Only by recognizing the existence of these problems can people think about trying to solve them.
+We'll dive into an incremental explanation of various concepts involved with file systems and operating systems. It dives into a lot of "suppose" and "what ifs" to try and get you the sense of the problems that lurk in plain sight. Only by recognizing the existence of these problems can people begin to think about trying to solve them.
 
 ```
 Solutions exist
@@ -67,7 +67,7 @@ struct vfs_ops abcdfs_vfs_ops = {
 };
 ```
 
-This interface is what the OS will use to interace with the file system. If a user wants to open a file, then the OS can expose a system call like `int open(char *path)` for the user. The internal implementation can be over-simplified to this:
+This interface is what the OS will use to interact with the file system. If a user wants to open a file, then the OS can expose a system call like `int open(char *path)` for the user. The internal implementation can be over-simplified to this:
 ```c
 int open(char *path)
 {
@@ -119,7 +119,7 @@ Let's go over the entire flow.
 
 A storage device is connected to your computer or machine, and the CPU can communicate with it using the driver it provides (not going into too many details of this part here as it deals with hardware I/O).
 
-Your OS will have that one FS it supports internally. It is upto the OS developer, and can be anything...rootfs, fat32, etc. This maintains a global hierarchical system from the root `/`. Due to the whole "everything in Linux is a file" thing, your device may be visible as a device in with a path like `/dev/my_device`. Again, it exploits the whole VFS-is-just-an-interface thing. As long as it is follows the interface, it can still do pretty much anything on your OS given enough permissions. A free, but not chaotic mess 🥳.
+Your OS will have that one FS it supports internally. It is upto the OS developer, and can be anything...rootfs, fat32, etc. This maintains a global hierarchical system from the root `/`. Due to the whole "[everything in Unix is a file](https://en.wikipedia.org/wiki/Everything_is_a_file)" thing, your device may be visible as a device in with a path like `/dev/my_device`. Again, it exploits the whole VFS-is-just-an-interface thing. As long as it is follows the interface, it can still do pretty much anything on your OS given enough permissions. A free, but not chaotic mess 🥳.
 
 ![fs](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1716198473/Screenshot_20240520_151422_ocimv9.png)
 
@@ -133,11 +133,11 @@ This is a very simplified and generalized way in which OS, FS and devices intera
 
 ## Conclusion
 
-Here we learnt how FS interacts with the OS, and in [Part III]({partthree}), we'll dive into FS and the various solutions that have emerged through the decades to an apparently "simple problem".
+Here we learnt how FS interacts with the OS, and in [Part III]({next}), we'll dive into FS and the various solutions that have emerged through the decades to an apparently "simple problem".
 
 ---
 
 <Cards>
-<Card icon="❰&emsp;" title="Part I" href={partone} />
-<Card icon="❱&emsp;" title="Part III" href={partthree} />
+<Card icon="❰&emsp;" title="Part I" href={prev} />
+<Card icon="❱&emsp;" title="Part III" href={next} />
 </Cards>
