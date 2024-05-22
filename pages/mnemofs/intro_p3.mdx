@@ -63,6 +63,8 @@ The very weird thing is that both the above types of file systems have mutually 
 
 We create a block based file system, but we also reserve a certain place in the device for the FIFO queue to store logs. We call this FIFO queue as the journal or bounded log. Best of both worlds. The block file system contains a sort of "base" state, and further changes to it are stored as entries or logs in the journal.
 
+To get the updated version of the file, all the FS has to do is to take the "base" state, and iterate over the journal applying changes to it.
+
 Independent of implementation, there is a very strong relationship between storage location and data due to the presence of the journal. This can cause an abnormal increase in wear of the journal along with the disadvantage of increased wear for a frequently updated file for block based file systems. Another problem is that there are essentially two file systems running in parallel, and both the code complexity and execution may increase.
 
 Depending on the implementation, this may have some additional problems. The file system may decide to *commit* logs to file system when the journal is full. This means that the "base" state needs to be updated, and thus, the journal emptied. The changes may be committed one by one, but power loss during committing the journal may cause garbled data as well.
