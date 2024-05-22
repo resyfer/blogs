@@ -87,7 +87,7 @@ A lot of problems, a lot of headache.
 
 An advantage about CoW file systems is that there are two copies of the block. Old and Updated. If the update was not successful, the old would be used.
 
-The wear levelling here depends on the block allocator, which will give the location where an update should be stored. Thus, a good algorithm for the block allocator will give good and even wear (copium 🤞, but it's _possible_ to do this, unlike other challenges which arise due to the nature of the file system).
+The wear levelling here depends on the block allocator, which is responsible for providing the location where an update should be stored. Thus, a good algorithm for the block allocator will give good and even wear (copium 🤞, but it's _possible_ to do this, unlike other challenges which arise due to the nature of the file system).
 
 A disadvantage of CoW file systems is pretty obvious as shown above. A simple update takes too many copies and writes due to updating all the fs objects in the file's path.
 
