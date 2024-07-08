@@ -18,7 +18,7 @@ GNU compilers provide a ``__builtin_ctz(x)`` for this, and in C 23, it's become 
 
 ## CTZ Skip List
 
-A skip list is a modified singly linked list that, instead of containing one pointer per node to point to the next node, contain more pointers in **addition** to the original pointer. Also, as shown by ``littlefs (who pioneered the CTZ skip list data structure) <https://github.com/littlefs-project/littlefs/blob/master/DESIGN.md#ctz-skip-lists>``_, Copy-On-Write benefits from a backward linked list (or a backward skip list) than a forward skip list.
+A skip list is a modified singly linked list that, instead of containing one pointer per node to point to the next node, contain more pointers in **addition** to the original pointer. Also, as shown by [littlefs (who pioneered the CTZ skip list data structure)](https://github.com/littlefs-project/littlefs/blob/master/DESIGN.md#ctz-skip-lists), Copy-On-Write benefits from a backward linked list (or a backward skip list) than a forward skip list.
 
 Skip lists prefer to keep the number of pointers per node as random to lower the cost of insertion and deletion. However, a Copy-On-Write file system has no need of "insertion" and "deletion". All of the operations are of the form of "appending" and all modifications requested are done in memory. We'll discuss how a CTZ skip list works in mnemofs, but first we need to know what is the structure of a CTZ skip list.
 
