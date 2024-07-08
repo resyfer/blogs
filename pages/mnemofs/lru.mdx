@@ -48,16 +48,13 @@ Power loss will cause all changes in the LRU to be lost. In fact, it's the only 
 The smaller the LRU is configured, the lesser you will lose after a power loss.
 </Callout>
 
-
 ## Applying updates
 
-When it's time to update convert the deltas into actual data on the flash, it's pretty complicated. The first task is to determine what _doesn't_ need to change. If a file takes up blocks `a, b, c, d` and if the block c has some deltas, then the new CTZ list has to be like `a, b, x, y` due to CoW. Thus, the "prefix" needs to be determined.
+When it's time to update convert the deltas into actual data on the flash, it's pretty complicated. The first task is to determine what _doesn't_ need to change. If a file takes up blocks `a, b, c, d` and if the block c has some deltas, then the new blocks have to be like `a, b, x, y` due to CoW. Thus, the "prefix" needs to be determined, which, in this case, is `a, b` blocks.
 
-After that, the 
+Now, we need to apply all updates contained in the deltas over such a file. Due to the limitation of the types of deltas, this gets much simplified into a two pointer method, where the upper limiter of the window shifts inwards by `x` bytes for every deletion that shifts `x` bytes **inside** the window. It might shift `x + y` bytes in total, where `y` bytes fall outside the window. The way this two pointer window algorithm works, `y` will not be lower than the minium limiter of the window, but rather, can only be higher that the upper limiter. We do not care about this, as the next iteration will take care of it. Also, we increment a deleted bytes counter...say `del`...by `x` to denote how many bytes have been deleted **before** the start of the window. So, then, if we are considering a window `x, x + m` in the new file, then we need to copy the bytes `x + del, x + m + del` from the old file. This way `del` marks the amount of "compensation" we need to provide.
 
-## Conclusion
-
-After the LRU, it's turn to look at the journal in mnemofs.
+After the window reaches the end of updates, it's time to save this new location in our journal.
 
 ---
 
