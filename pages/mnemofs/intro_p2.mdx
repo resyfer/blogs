@@ -89,7 +89,7 @@ This has some obvious advantage:
 
 ## Drivers and Operating Systems
 
-Without diving into too much details, a lot of OSes also have an interface similar to a VFS for device drivers, which includes drivers for storage devices.
+Without diving into too much detail, a lot of OSes also have an interface similar to a VFS for device drivers, which includes drivers for storage devices.
 
 Now the FS developers do not have to explicitly support a very specific storage device from a very specific manufacturers, but can become more generalized. Instead of making a FS that supports only Samsung 1TiB SSDs, I can move on to making an FS that instead, say, supports only SSDs, leaving the implementation details to the drivers provided by the manufactureres.
 
@@ -122,7 +122,7 @@ A storage device is connected to your computer or machine, and the CPU can commu
 
 Your OS will have that one FS it supports internally. It is upto the OS developer, and can be anything...rootfs, fat32, etc. This maintains a global hierarchical system from the root `/`. Due to the whole "[everything in Unix is a file](https://en.wikipedia.org/wiki/Everything_is_a_file)" thing, your device may be visible as a device in with a path like `/dev/my_device`. Again, it exploits the whole VFS-is-just-an-interface thing. As long as it is follows the interface, it can still do pretty much anything on your OS given enough permissions. A free, but not chaotic mess 🥳.
 
-![fs](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1716198473/Screenshot_20240520_151422_ocimv9.png)
+![fs](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1716198473/mnemofs/Screenshot_20240520_151422_ocimv9.png)
 
 If you want to use this device with a file system, you need to mount it. So, this storage is then mounted at a certain location in your computer's location, say, `/hi`. This process involves mentioning the file system that you want to mount this device with, say `abcdfs`. This creates a directory `/hi` which will now serve as the root for this storage device. The metadata about the mount process is stored by the OS (where it is stored is implementation dependent).
 

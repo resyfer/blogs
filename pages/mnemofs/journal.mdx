@@ -16,7 +16,7 @@ eg. 1860 is ``11101000100`` in binary, and there are ``2`` trailing zeroes in it
 
 GNU compilers provide a ``__builtin_ctz(x)`` for this, and in C 23, it's become a part of the official standard. Most CPU architectures support this instruction.
 
-## CTZ Skip List
+### CTZ Skip List
 
 A skip list is a modified singly linked list that, instead of containing one pointer per node to point to the next node, contain more pointers in **addition** to the original pointer. Also, as shown by [littlefs (who pioneered the CTZ skip list data structure)](https://github.com/littlefs-project/littlefs/blob/master/DESIGN.md#ctz-skip-lists), Copy-On-Write benefits from a backward linked list (or a backward skip list) than a forward skip list.
 
@@ -28,11 +28,19 @@ In mnemofs, each CTZ skip list block takes exactly one page of space.
 
 Since it's possible to iterate to any CTZ skip list block from the very last CTZ skip list block, only the page number and index of the last CTZ skip list block is stored, along with the size of the file. Mnemofs uses CTZ skip lists like its creator, littefs, does. However, mnemofs uses it to represent files **and** directories.
 
+### Travel and Offset
+
+We'll use the word "offset" to refer to "data offset", which is the offset into the actual data contained in the CTZ skip list, which doesn't include the pointers.
+
+Conversion of the offset into its CTZ skip list block index and page offset can be done through the derivations done by [littlefs](https://github.com/littlefs-project/littlefs/blob/master/DESIGN.md#ctz-skip-lists).
+
+Travel from one CTZ skip list block to the other can be done using a greedy approach that utilizes the fact that the powers of 2 that change from one CTZ skip list block to the other while travelling first monotonically increase, and then, monotonically decrease. The graph _might_ be discontinuous, but that's not an issue. It's actually easier to understand by reading the code in this case.
+
 ## Journal Logs
 
 Back to the journal, now, once the updated information of the CTZ skip list is received, it is logged to the journal along with a CTZ skip list representation of the path of the FS object. This log is followed by a checksum to make sure that the entire log was written correctly to the flash.
 
-## Structure
+### Structure
 
 The journal consists of blocks from the NAND flash. The last two blocks allocated for the journal are reserved for the master node, and are called master blocks (more on that later). The first block starts with an 8 byte magic sequence, followed by the number of blocks (all ``n + 2`` blocks) allocated to the journal, and then an array that contains the block numbers of all the blocks allocated to the journal.
 
