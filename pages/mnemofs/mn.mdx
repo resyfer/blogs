@@ -1,0 +1,32 @@
+import { Cards, Card } from 'nextra/components'
+
+export let prev = "/mnemofs/journal";
+export let home = "/";
+export let next = "/mnemofs/ba";
+
+# Mnemofs's Master Node
+
+The master node in mnemofs is the entity that can be used to get the location of the root of the file system.
+
+When the journal is flushed (or, rather, the first ``n`` blocks are flushed), then all of the changes in the journal are applied to the entire file system in a true CoW way, and this finally cascades to the root of the file system, till the root is updated.
+
+At this state, both the old data and the new data exist simultaneously, and the new location of the root is recorded in a new master node, and written to the flash. Once the new master node is written to the flash, only the the entire file system's "base state" gets updated, and now there is no risk of losing changes or leaving the device in an unrecoverable state (at least, till new updates come in). The block allocator ensures that both the data exist together, and that old pages are not erased, till the new master node is not written, which can allow for rollback of changes.
+
+The master blocks are duplicates of each other, and contain multiple instances of the master node. Master node takes no more than a single page, and contains information about the root, in a way similar to a parent directory. The master blocks contain various "revisions" (or instances) of the master blocks. It's important to note that only the latest master block is a "valid" master block. This means that all older master blocks do not point to a valid file system.
+
+## Journal Flush
+
+The first ``n`` blocks of the journal will be erased much more often than the master blocks, due to the design of the file system. This means that the journal needs to move for every time it's flushed. However, not all of the journal needs to follow this. The master blocks will move only when they are full, which happens after each integral number of journal flushes. Thus, there are some times when the journal moves alone, while at others, the journal moves along with the msater blocks.
+
+## Conclusion
+
+Here you saw how the journal of mnemofs works. Now, moving on to the block allocator.
+
+---
+
+<Cards>
+<Card icon="❰&emsp;" title="Mnemofs Journal" href={prev} />
+<Card icon="❱&emsp;" title="Mnemofs Block Allocator" href={next} />
+</Cards>
+<br/>
+<Card icon="⌂&emsp;" title="Home" href={home} />

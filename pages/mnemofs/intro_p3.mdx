@@ -1,7 +1,8 @@
 import { Cards, Card } from 'nextra/components'
 
 export let prev = "/mnemofs/intro_p2";
-export let next = "/coming_soon";
+export let home = "/";
+export let next = "/mnemofs/mnemofs";
 
 # Introduction Part III | mnemofs
 
@@ -103,11 +104,13 @@ The amount of extra space used by old copies are determined by the aggressivenes
 
 Too many types of file systems, and too many problems. They try to solve some problem, but end up creating another, or solving it partially. Mnemofs is heavily inspired from littlefs, which itself tries to take best of both CoW and journalling file systems and combines it with some ingenious problem solving.
 
-We'll look into mnemofs and its journal in the next part.
+We'll look into mnemofs in the next part.
 
 ---
 
 <Cards>
 <Card icon="❰&emsp;" title="Part II" href={prev} />
-<Card icon="❱&emsp;" title="Journal" href={next} />
+<Card icon="❱&emsp;" title="Mnemofs" href={next} />
 </Cards>
+<br/>
+<Card icon="⌂&emsp;" title="Home" href={home} />

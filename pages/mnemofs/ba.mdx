@@ -1,0 +1,26 @@
+import { Cards, Card } from 'nextra/components'
+
+export let prev = "/mnemofs/mn";
+export let home = "/";
+export let next = "/mnemofs/mideval";
+
+# Mnemofs's Block Allocator
+
+The block allocator of mnemofs is inspired from littlefs a lot, but it differs a lot. Since NAND flashes are a common device used for sensors, allocation of blocks or pages need to be fast. This means shifting the RAM vs speed tradeoff a little bit, such that it consumes more RAM.
+
+The block allocator wants to be fair and spread wear as evenly as possible. So, like littlefs's block allocator, this starts from a random block, and keeps assigning pages. Now, in mnemofs, pages and blocks can both be expected from the block allocator. In this case, the block allocator skips pages till the start of the next nearest block, and allocates from there. Since most block allocations are done by internal data structures, and they happen in bulk, skipped pages are not too much in count. Contiguous allocation **may** happen, but it may not as well.
+
+The block allocator contains a bitmap of each page to denote if it's being used or not. The block allocator also contains an array of counters for each block in the device. These counters count the number of pages inside that block that want to be deleted. If all of the pages inside a bllock want to be erased, then the next time the block allocator comes across this block (or any page in it), it will immediately erase the block and then allocate blocks or pages.
+
+## Conclusion
+
+So, all in all, this are the ins and outs of mnemofs. A weird place to end the series? There are follow up blogs of my journey designing and implementing this!
+
+---
+
+<Cards>
+<Card icon="❰&emsp;" title="Mnemofs Master Node" href={prev} />
+<Card icon="❱&emsp;" title="GSoC '24 @ Apache NuttX, Mid Term Evaluation Blog" href={next} />
+</Cards>
+<br/>
+<Card icon="⌂&emsp;" title="Home" href={home} />
