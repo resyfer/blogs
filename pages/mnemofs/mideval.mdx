@@ -4,57 +4,138 @@ export let prev = "/mnemofs/mn";
 export let home = "/";
 export let next = "/coming_soon";
 
-# Google Summer of Code '24 @ Apache NuttX, Mid Term Evaluation Blog
+# Google Summer of Code '24 @ Apache NuttX, Mid-Term Evaluation Blog
 
-Hi! I am Saurav Pal, a recent graduate, and a regular passionate developer interested in systems and anything low level, and I welcome you to my blog that covers my journey as a Google Summer of Code (GSoC) Contributor for Apache NuttX in 2024, right from the very start to the very end. My project involves designing and implementing mnemofs, a NAND Flash File System for Apache NuttX.
+Hi! I am Saurav Pal, a recent graduate, and a regular passionate developer interested in systems and anything low-level. I welcome you to my blog, which covers my contributions and journey as a Google Summer of Code (GSoC) Contributor for Apache NuttX in 2024, from the very start to the end. My project involves designing and implementing mnemofs, a NAND Flash File System for Apache NuttX.
 
-<Callout type="info" emoji="ℹ️">
+## My Contributions
+
+From before the start of GSoC till the midterm evaluation, I have made a few contributions to NuttX. Keeping the unrelated ones for later, here's my work on mnemofs:
+
+- [(`#11806`) Virtual NAND Flash device for the NuttX Simulator](https://github.com/apache/nuttx/pull/11806)
+- [(`#12658`) Mnemofs setup and VFS methods](https://github.com/apache/nuttx/pull/12658)
+- [(`#12661`) Mnemofs Block Allocator](https://github.com/apache/nuttx/pull/12661)
+- [(`#12668`) Mnemofs parent iterator and path methods](https://github.com/apache/nuttx/pull/12668)
+- [(`#12680`) Mnemofs LRU and related CTZ methods](https://github.com/apache/nuttx/pull/12680)
+- [(#) Mnemofs Journal](#)
+- [(#) Mnemofs Master Node](#)
+
+The file system is in a basic testable state, however, it's riddled with many bugs that need to be solved. The file system needs to undergo thorough testing to ensure it's reliable.
+
+## Components
+
+The files for mnemofs code have these meanings:
+- ``mnemofs.c``: Entry point to the FS. All the implementations of Virtual File System (VFS) methods are in this file.
+- ``mnemofs_blkalloc.c``: Contains Block Allocator. Provides a block or page when needed, also marks used pages, and is responsible for erasing a block when all pages in a block want to be erased.
+- ``mnemofs_fsobj.c``: This contains FS Object methods, i.e. path and parent iterator methods to the VFS methods. This abstracts away the file and directory structure in the flash and the management of on-flash data and updation of that with the LRU updates. These interact only with the LRU, which also provides wrappers for underlying methods.
+- ``mnemofs_lru.c``: Contains the LRU. This stores updates to a file or directory and bunches up the updates to apply batches of updates in one go, to reduce the number of writes to the flash, or allocations of blocks or pages. This helps in reducing the wear. A higher chance of power loss should be accompanied by a lower configured LRU size. The LRU stays in the memory and interacts with the flash through the CTZ methods. This provides a wrapper over CTZ methods as well, to make it simpler for FS objects to get data with LRU updates applied.
+- ``mnemofs_ctz.c``: Contains CTZ methods. These are used to directly write/read CTZ information to/from the flash. This lies as a wrapper over the journal and will update, or be updated from the journal. These abstract away the data portion of the CTZ skip list, and don't let the caller worry about the pointers, and instead treat the data portion across blocks (of varying sizes) as a single unit that can be used with an offset from the start. The journal should not be accessed directly, but instead through this.
+- ``mnemofs_journal.c``: Contains the Journal. This contains a lot of logs in a sequential manner. Each log contains a path of the old file in the form of an array of CTZ list information of all the FS objects in the path and the new CTZ list information, and this is appended by a checksum of the log.
+- ``mnemofs_rw.c``: Contains the raw read, write, erase, check bad block, and mark bad block methods. These will only be used by the CTZ methods and the journal. These are very simple and are almost just a wrapper over the underlying device driver's exposed methods.
+
+A detailed blog on the various components can be found [here](./mnemofs).
+
+## Key Decisions
+
+Some decisions make the implementation differ from the initial design of mnemofs:
+
+- **Journal**: The journal was initially meant to serve as a circular singly linked list. This would be problematic for a lot of reasons. This would mean that every block would contain the page number, most logically at the very end or the start. Journal blocks are allocated at the start, during the binding phase of a file system. As you can only write to a page once (before erasing), it means that the block numbers have to be written somewhere right at the start. The block numbers are 4 bytes in length, compared to a usual minimum of 512 byte page length. Thus, an entire page per block would be waster for this. So, it was decided that there would be an entire array containing the block numbers in the journal, and it would be preceded by a count of the number of blocks. Since it's a block that has a large size, it's assumed that the array will not extend past a single block. If the array ends in the middle of a page, the rest of the page is left unutilized. Thus, we waste a maximum of slightly less than 1 page worth of storage, compared to the `number of blocks` worth of pages.
+
+- **LRU**: The LRU earlier contained a generic interfacing of exchanging `x` bytes with `y` bytes. However, applying these commits to an array becomes a nightmare with limited memory usage. Thus, it was narrowed down to two cases... `x` bytes replaced with `x` bytes in the updated file (unless it's the end of the file), or `x` bytes replaced with `0` bytes in the updated file. This made the entire process much simpler, reducing it to be solved with a simple 2-pointer approach.
+
+- **Wrapper Approach**: Almost everything is a wrapper to another layer of methods, even in situations where it simply just calls the corresponding underlying method itself. This was done to reduce cases where one function would, say, update location from the Journal, but one would not, and you need to keep that in your mind, or make mistakes. Here, uniformity helps clear doubts.
+
+## My Journey
+
+<Callout type="warning" emoji="ℹ️">
 Disclaimer: Contains a lot of rants and yapping.
 </Callout>
 
-## Pre-GSoC
+### Pre-GSoC
 
-### Pre-Apache NuttX Period
+#### Pre-Apache NuttX Period
 
 Before the GSoC period, I was looking into Linux, trying to get started as a contributor. But first, I needed to have a fair understanding of how the whole thing works. Baby steps, you know. Read the famous [Robert Love's book](http://www.doc-developpement-durable.org/file/Projets-informatiques/cours-&-manuels-informatiques/Linux/Linux%20Kernel%20Development,%203rd%20Edition.pdf), saw a lot of videos, and of course, tried to read the codebase.
 
 It was overwhelming, and it was stressful, because... I mean, just look at Linux's codebase **and** its history. I was also interested in embedded systems, but I was trying to do one thing at a time. While I was going through the codebase, I was hooked on to the history of file systems in the codebase. You could see new file systems appear and some old ones disappear every few versions. Over that, I had heard file systems are the lowest in the whole tree, and are kind of only dependent on the Virtual File System and whatever the storage driver is, and that too that file system developers do not need to worry too much about the storage device (as long as it's of the same technology, but I didn't know this then), or the internals of the OS.
 
-So, I felt file systems would be a great starting point. Started reading the codebases of the various file systems. After 3-4 file systems, all of them seem to swim in front of my eyes, and feel the same, and concepts from one FS seemed to merge with concepts from another FS 🫠. Still, carried on, as I knew if I try to read it repeatedly, it will start making sense someday. Every line of C makes sense, as mostly nothing is really hidden away, and more so in the case of OS codebases. If it were a higher level language, I would have just probably given up, idk.
+So, I felt file systems would be a great starting point. Started reading the codebases of the various file systems. After 3-4 file systems, all of them seemed to swim in front of my eyes and feel the same, and concepts from one FS seemed to merge with concepts from another FS 🫠. Still, carried on, as I knew if I tried to read it repeatedly, it would start making sense someday. Every line of C makes sense, as mostly nothing is hidden away, and more so in the case of OS codebases. If it were a higher level language, I would have just probably given up, idk.
 
-I wanted to apply for GSoC once again for 2024, and this time, for a large project (I had done a medium project in 2023). Around this time, I thought of looking into any OS related projects that are available, as those align with my interests. Found Apache NuttX. What does NuttX and the project I found have in common with my interests? Everything! File System + Operating System + Embedded Systems. All my boxes ticked, and a match made in heaven, at least from my side 😉.
+I wanted to apply for GSoC once again for 2024, and this time, for a large project (I had done a [medium project for PostgreSQL in 2023](https://summerofcode.withgoogle.com/archive/2023/projects/Djrl5w5B)). Around this time, I thought of looking into any OS-related projects that are available, as those align with my interests. Found Apache NuttX. What does NuttX and the project I found have in common with my interests? Everything! File System + Operating System + Embedded Systems. All my boxes ticked, and a match made in heaven, at least from my side 😉.
 
-### First PR
+#### First PR
 
-So, I decided to look into Apache NuttX, and try to understand it. I tried looking into good first issues, but honestly, I was just too optimistic at that point and even the scant few first issues were very advanced for the past me. I could succesfully set up NuttX, and build the simulator configuration (I did not have **any** embedded boards, but more on that later).
+So, I decided to look into Apache NuttX and try to understand it. I tried looking into good first issues, but honestly, I was just too optimistic at that point and even the scant few first issues were very advanced for the past me. I could successfully set up NuttX, and build the simulator configuration (I did not have **any** embedded boards available, but more on that later).
 
-I did not wish for hand holding, as it's often detrimental to the learning process, but I did wish for a nudge in the right direction. And so I contacted [Alan](https://github.com/acassis) who was listed as a mentor to the project on any kind of resources I could gather. He very generously provided some resources, and suggested I should look into existing FS codebases (like I had done in Linux).
+I did not wish for hand-holding, as it's often detrimental to the learning process, but I did wish for a nudge in the right direction. And so I contacted [Alan](https://github.com/acassis) who was listed as a mentor to the project on any kind of resources I could gather. He very generously provided some resources and suggested I should look into existing FS codebases (like I had done in Linux).
 
-The difference between Linux and NuttX codebases? NuttX codebase looks beautiful. Sure, Linux might look beautiful to the experts, but NuttX looks good even to the newbies like me. A lot of the code is properly documented...each function, what it does, and even sometimes, why it exists.
+The difference between Linux and NuttX codebases? NuttX codebase looks beautiful. Sure, Linux might look beautiful to the experts, but NuttX looks good even to newbies like me. A lot of the code is properly documented...each function, what it does, and even sometimes, why it exists.
 
-I looked at the [FAT file system code](https://github.com/apache/nuttx/tree/master/fs/fat). In and of itself, the code isn't too complicated. But NuttX contribution style made a lot of things clear to a someone like me who was mostly stumbling around in the dark, trying to make sense of my surroundings. Finally, while reading the codebase, I came [across a bug](https://github.com/apache/nuttx/pull/11647) that initially I thought was something that I couldn't understand the meaning of. After asking around on the mailing list, I found out that this bug went unnoticed because the particular way the macro was used in the codebase till then made the expansion correct, even if the macro itself was incorrect, and might cause problems if the usage of the macro was modified. So, I patched it, and made my first [Apache NuttX PR](https://github.com/apache/nuttx/pull/11647)!
+I looked at the [FAT file system code](https://github.com/apache/nuttx/tree/master/fs/fat). In and of itself, the code isn't too complicated. But NuttX's contribution style made a lot of things clear to someone like me who was mostly stumbling around in the dark, trying to make sense of my surroundings. Finally, while reading the codebase, I came [across a bug](https://github.com/apache/nuttx/pull/11647) that initially I thought was something that I couldn't understand the meaning of. After asking around on the mailing list, I found out that this bug went unnoticed because the particular way the macro was used in the codebase till then made the expansion correct, even if the macro itself was incorrect, and might cause problems if the usage of the macro was modified. So, I patched it, and made my first [Apache NuttX PR](https://github.com/apache/nuttx/pull/11647)!
 
-### More contributions
+#### More contributions
 
-Alan had mentioned that the FAT file system documentation was a bit lacking and so since I was already looking at the file system, writing it down somewhere would be a good idea, and why not the official documentation :D. So, I researched into FAT FS (or, rather VFAT), and alongside reading the code, I wrote down whatever I learnt, and finally updated the documentation in my [second PR](https://github.com/apache/nuttx/pull/11656).
+Alan had mentioned that the FAT file system documentation was a bit lacking and so since I was already looking at the file system, writing it down somewhere would be a good idea, and why not the official documentation :D. So, I researched FAT FS (or, rather VFAT), and alongside reading the code, I wrote down whatever I learned, and finally updated the documentation in my [second PR](https://github.com/apache/nuttx/pull/11656).
 
-Now I wanted to move higher in the OS tree. So, I thought about learning about the VFS. Since this VFS shares a lot with Linux's structure, I could apply the VFS resources for Linux here. Along with this, I looked into the codebase, and learnt more about the VFS. Of course, not all of it, but a lot of it. I updated the documentation for the VFS as my [third PR](https://github.com/apache/nuttx/pull/11730).
+Now I wanted to move higher in the OS tree. So, I thought about learning about the VFS. Since this VFS shares a lot with Linux's structure, I could apply the VFS resources for Linux here. Along with this, I looked into the codebase and learned more about the VFS. Of course, not all of it, but a lot of it. I updated the documentation for the VFS as my [third PR](https://github.com/apache/nuttx/pull/11730).
 
-### NAND Flashes
+### GSoC Community Bonding Period
 
-Around this time, I had received an ordered STM32F401 board. I had ordered this before my interactions with NuttX community and Alan, and it was just a buy-whatever-feels-popular-and-cheap, and I received it late due to my campus's remote location. Suprise! It doesn't have the JTAG programmer, and I need to buy one. Another infinite waiting period for that to get delivered.
+This was the community bonding period. Asking questions, talking with the mentor, getting comfortable, exploring the solution proposed, and its feasibility, and exploring any improvements, and not to forget, setting up everything.
 
-I was sick of this wait, and wanted to learn about NAND flashes, and thus, about drivers in NuttX. So my thought process went like this: "I am already using the simulator. Why not simulate NAND Flash in it? I have already seen QEMU simulate chips. If CPUs, why not peripherals." And so, after some headache-filled days, I made my fourth set of PRs ([this](https://github.com/apache/nuttx/pull/11806) and [this](https://github.com/apache/nuttx-apps/pull/2319)) to add a NAND Flash virtual device as an app in the simulator.
+#### NAND Flashes
 
-This made me learn about both NAND Flashes, as well a lot of insight into drivers work in NuttX. Both are very critical for my understanding, if I am to develop a file system for NuttX.
+I had an STM32F401 board, but the trouble with it stemmed from the fact that its headers were not soldered. It was quite a trouble getting them soldered, but I had it ready around this time. I had ordered this before my interactions with the NuttX community and Alan, and it was just a buy-whatever-feels-popular-and-cheap. Surprise! It doesn't have a JTAG programmer, and I need to buy one. Another infinite waiting period for that to get delivered to my remote campus.
 
-### Tinkering with my board
+I was sick of this wait and wanted to learn about NAND flashes, and thus, about drivers in NuttX. So my thought process went like this: "I am already using the simulator. Why not simulate NAND Flash in it? I have already seen QEMU simulate chips. If CPUs, why not peripherals." And so, after some headache-filled days, I made my fourth set of PRs ([this](https://github.com/apache/nuttx/pull/11806) and [this](https://github.com/apache/nuttx-apps/pull/2319)) to add a NAND Flash virtual device as an app in the simulator.
 
-### mnemofs
+This made me learn about both NAND Flashes, as well as a lot of insight into drivers' work in NuttX. Both are very critical for my understanding if I am to develop a file system for NuttX.
 
-## GSoC Community Bonding Period
+#### Setting up NuttX on my board
 
-## Till Mid Term Evaluation
+So, I came back from my campus, to my home, at this time. I have the JTAG programmer and an STM32F401 board. I tried flashing NuttX in it. The LED kept blinking, and Alan said it was because it was crashing (and restarting continuously). It was very weird, because the same NuttX configuration worked for his board, but not mine, which were both STM32F401 boards. To this day, it's a mystery, but it's probably because it's a locally produced cheap copy of the board in my case. Over that, I didn't have a USB-Serial Adapter, so needed to buy one as well.
+
+So I got my hands on another board, an STM32F103. This time it was a no-go either. After much looking around, Alan pointed out a frequent issue of the wrong R10 pull-up resistor. While a solution can be found [here](http://amitesh-singh.github.io/stm32/2017/05/27/Overcoming-wrong-pullup-in-blue-pill.html), I could not *modify* the board as I was just borrowing it.
+
+So, I bought an [ESP32-DevKit-V1](https://circuitstate.com/wp-content/uploads/2022/12/ESP32-DevKit-V1-Pinout-Diagram-r0.1-CIRCUITSTATE-Electronics-2.png), and while it's probably a local copy as well, it works with NuttX.
+
+#### NAND Flash
+
+Acquiring the NAND flash was a difficult task. None were locally available. Absolutely none. The scant few online were of WSON8 type, which would be hard for me to solder, but they also were of a different voltage specification. I had to import them and bought a W25N from Mouser. Import duty in India is hell, and it cost me 3 times the actual cost of the components.
+
+Now, soldering this one was problematic as well. My jumper wires would not have solder stuck to them, nor did I have a breakout board that could fit it. So, I had to improvise. Since the desoldering wick contains copper, which is conductive, I broke a small part of it into 8 small wires (only 8 are required for connection) and then soldered them onto the NAND chip, from these wires, I attached the jumper wires by soldering them to these copper bits.
+
+Behold Spider NAND :D.
+
+![nand](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1720848400/mnemofs/Screenshot_20240713_105534_ixb8vb.png)
+
+### Till Mid-Term Evaluation
+
+Till the mid-term evaluation, my PR spree had come to a hiatus. This is because it's very tough to test individual parts of the file system. Almost everything is interdependent, and thus testing one without completing the other gains no knowledge about how it will behave together. Thus, the file system had to be written first. The entirety of it. At least, to a working state.
+
+Thus, that's what I did. Wrote it down all.
+
+Then, split it into [multiple PRs](#my-contributions).
+
+### Apache Workshop
+
+I participated in Apache NuttX International Workshop 2024 as a speaker, talking about my project, and it was amazing. So many opinions, and amazing projects related to NuttX, it was amazing to see them.
+
+![badge](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1720848878/mnemofs/NuttX_badge_kvzjw2.png)
+
+## Mid-Term Evaluation Result
+
+Passed :D.
+
+## Acknowledgement
+
+First up, a thank you to my parents. Words can never be enough for this, and I can never thank them enough for this.
+
+Next, a big thank you to Alan, who's my mentor. Spending so much time patiently mentoring and encouraging me, even after multiple blunders along the path...couldn't have asked for more. I have gained a new perspective on a lot of open-source-related things due to the various talks and exposure.
+
+Also, a big thank you to [Lup](https://github.com/lupyuen) and [Xiang](https://github.com/xiaoxiang781216) who have helped me whenever I approached them with my doubts as well.
+
+Finally, a thank you to my co-contributor Rushabh Gala and my friends whose support helped me cope with everything.
 
 ---
 
