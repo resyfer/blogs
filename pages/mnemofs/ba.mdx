@@ -4,6 +4,7 @@ export let prev = "/mnemofs/mn";
 export let home = "/";
 export let next = "/mnemofs/mideval";
 
+<div style={{textAlign: "justify"}}>
 # Mnemofs's Block Allocator
 
 The block allocator of mnemofs is inspired by littlefs a lot, but it differs a lot. Since NAND flashes are a common device used for sensors, the allocation of blocks or pages needs to be fast. This means shifting the RAM vs. speed tradeoff a little bit so that it consumes more RAM.
@@ -15,6 +16,7 @@ The block allocator contains a bitmap of each page to denote if it's being used 
 ## Conclusion
 
 So, all in all, these are the ins and outs of mnemofs. Is it a weird place to end the series? There are follow-up blogs of my journey in designing and implementing this file system!
+</div>
 
 ---
 

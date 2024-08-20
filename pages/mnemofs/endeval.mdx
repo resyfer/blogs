@@ -1,0 +1,99 @@
+import { Cards, Callout, Card } from 'nextra/components'
+
+export let prev = "/mnemofs/mn";
+export let home = "/";
+export let next = "/coming_soon";
+
+# Google Summer of Code '24 @ Apache NuttX Final Report
+
+<Callout type="info" emoji="ℹ️">
+**TL;DR**: NO! No shortcuts, it's worth it I promise.
+</Callout>
+
+<div style={{textAlign: "justify"}}>
+Hi, I am Saurav Pal. I was a Google Summer of Code (GSoC) '24 contributor to the Apache NuttX Real Time Operating System (RTOS), working on designing and implementing mnemofs, a file system for NAND flashes, aiming at enabling file system support for the NAND flashes in the Apache NuttX RTOS.
+
+I'll be taking you through my entire work. Prerequisites you ask? None. Actually, you just need to know English. I'll be explaining everything else.
+
+## Storage devices
+
+A lot of storage devices are available like floppy disks. Ok, probably not the best example as some of the readers may not even have seen floppy disks in their lives. Compact Disks (CDs), Hard Disk Drives (HDDs) and Solid State Drives (SDDs) are some more recent mediums of storage. NAND flashes are one such storage devices.
+
+When we talk about storage devices, we mean non-volatile memory. This means that the stored data is persistent even when power is no longer being provided to the storage device. Random Access Memory (RAM) is the standard example for a volatile memory medium, which loses all data once it loses power.
+
+A close competitor to the NAND flash is the NOR flash, and they are very often compared to be selected as a means of persistent storage for embedded systems.
+
+## NAND vs NOR
+
+<ins>Now, what is NAND or NOR?</ins>
+
+Good question, because it's something you're not required to know for the purpose of this report.
+
+<ins>What are NAND or NOR flashes?</ins>
+
+Good question, because it's something you're required to know for the purpose of this report.
+
+<br/>
+
+NAND and NOR flashes are made out of NAND and NOR gates (like mentioned above, not required to know). Formally, NAND flashes are a type of programmable, non-volatile storage technologies built with cells of NAND gates.
+
+Why, where and which should I use? It's complicated. NAND flashes require less number of lines in their structure, and thus are more **compact** and **cheaper** than NOR flashes as they require less silicon for the same storage space. Sequential reads are faster in NAND flash, but NAND flashes are slower in random access reads. NOR flashes allow a single [machine word](https://en.wikipedia.org/wiki/Word_(computer_architecture)) to be written to an erased location or read independently. NAND flashes require reads or writes to be in pages, and erases to be in blocks (more on this later). Moreover, NAND flashes are more prone to random bit flipping, and a higher percentage of blocks turn out to be bad blocks right from manufacture, compared to NOR (again, further explanation below).
+
+## Structure of NAND flashes
+
+The structure of NAND flashes is very multi-layered for others, but simple for us. All we need to know is that a NAND flash is made up of tiny units called blocks, which are themselves made out of tinier units called pages, which further are made up of even tinier units called cells.
+
+While we don't have to think down to cell level, it's good to know some things about it. In a Single-Level Cell (SLC) NAND flash, each cell is one bit. There are other levels like Multi-Level Cell (MLC) NAND flashes and Triple-Level Cell (TLC) NAND flashes depending on the number of bits per cell.
+
+What we do need to consider are pages and blocks. A block is the smallest erasable unit, while a page is the smallest readable or writeable unit. What is the role of erasable you might ask? Well, if a page was previously written to, it needs to be erased before it can be written again. But since a block is the smallest erasable unit, you'll need to erase the entire block to update a certain page in the block. Another troublesome problem with the erase operation is that on every erase, a block is slightly more worn out that before. Upon repeated erase, it might not be able to reliably store data anymore, which means that it's not gauranteed that the data you read from any page within the block is the data that was written to that page.
+
+The onset of this state of unreliability of a block means that the block is now a "bad block". However, usage is not the sole cause of bad blocks in NAND flashes. Any good manufacturer tests their products before selling them. In the process of testing a NAND flash, some blocks might be deemed to be unfit for storage right from manufacture itself as they exhibit the unreliability of bad blocks, and are thus also clubbed under bad blocks.
+
+Mentioned above is the tendency for NAND flashes to undergo random bit flipping. What is bit flipping? As the name suggests, the bits might flip sides (pretty treacherous, I know). This is a phenomenon not specific to NAND flashes, and over the years, people have come up with various solutions to deal with this. The solution NAND flashes use is to have parity bits (extra, redundant bits to recognize and rectify bit flips). These parity bits may be stored in the page itself, but a common consensus has come up to keep these bits in a separate area in the page.
+
+Thus, a page is split into two parts: a spare area, and a user data area. The user data area contains, well, the user data. The spare area contains the bits for Error Correction Code (ECC), and even a bit for bad block marking (called as a bad block marker), and some other bits. A bad block marker is mostly used by the manufacturer to denote whether a particular block is a bad block.
+
+## Virtual File System
+
+What you should know is that Apache NuttX, like most Operating Systems (OSes), has a [subsystem](https://www.merriam-webster.com/dictionary/subsystem) called as the Virtual File System (VFS). This is technically not a file system itself, but it is tasked with the job of dealing with file systems. What you need to know is that the VFS mandates each file system, that aims to be used as part of an OS, to expose its functionality by following a fixed [interface](https://www.merriam-webster.com/dictionary/interface). This means that the file system needs to follow some rules regarding what it is expected to do and it needs to follow some expectations of behaviour. This situation can be fully understood using a hypothetical situation I just made up.
+
+Imagine the VFS doesn't exists. You ask your OS to help save the text "hello world" to a file with a name and location of your choice. Now, without any standards of communication or expectations that come with these standards, it might be the case that, depending on which file system you choose, their functionality might range from doing nothing to probably hacking the [NSA](https://www.nsa.gov/). This is total chaos. The OS can't decide which function to call from each FS for your desired task.
+
+To enable this, either the OS needs to know the names of the functions of each file system, or the file systems have to mention the names of the functions that correspond to each functionality that the OS expects a file system to have. We have evolved to agree on the latter, as it puts the burden onto the poor FS developers like me, and also allows you to use file systems that might not be officially included in the OS, but rather, built by some sketchy guy you found on the dark web which you find to be suprisingly the fastest (and which seems to be making a lot of network requests sometimes _wink_).
+
+Thus, this allows the side effects of a file system operations on the rest of the operating system to be uniform, defined and predictable (on paper, at the very least) regardless of the file system being used. Thus, the rest of the OS, or even the user, does not need to care about the specifics of the underlying file system, and thus, a VFS enables an OS to be able to support multiple file systems at once. In short, a VFS mandates **what** the file system does, but not **how** they do it (this is where file systems differ from each other).
+
+Further, let's say, hypothetically, all FSes could hack the NSA and they each tell the OS the function that will start the hack as required by the VFS. Some day, a new FS is developed by a budding programmer who is not interested in these mundane and boring tasks. What the FS wants to do is launch some of the nuclear missiles which might be owned by your government. Now, this is an unusual behaviour for a file system (in this hypothetical world). All file systems have stopped till the line of hacking the NSA. To enable this feature, the OS would need to expand its VFS. The latter part is what happens in the real world as well, though, I can not gauranteed about the former. Any new "feature" expected of file systems needs to be implemented by expanding the VFS. Also, if you can guess, after the expansion of the VFS, both FSes can co-exist. They both implement some features of the VFS, while ignoring others, which is perfectly fine.
+
+<Callout type="info" emoji="ℹ️">
+Since we're living in happier times, our file systems are content at just managing our storage devices. In fact, since we're talking about standards, [POSIX](https://en.wikipedia.org/wiki/POSIX) has some of their own [guidelines](https://parallelstorage.com/2017/12/29/posix-file-system-basics/) on what a file system is expected to do.
+</Callout>
+
+## Files and Directories
+
+File systems ultimately help managing storing ones and zeroes onto storage devices to be painless for the user. They abstract away the peculiarities of the underlying electronics storage device, and the pain of remembering the location of each bit of data, and many other such things. Over the years, file systems have evolved to agree on some basic concepts (with the [FOMO](https://en.wikipedia.org/wiki/Fear_of_missing_out) of the POSIX and the big shots party).
+
+Some of these constructs are namely files and folders/directories, often collectively called FS objects. You group data belonging to one specific thing as one file, while you arrange multiple files or other directories corresponding to each topic into one directory. It's almost entirely dependent on where you draw the line.
+
+Another of these constructs is the root of a file system and path. Root is the name given to the directory that contains all other files or directories, and is created by all file systems before you even use it. As you can see, this entire directory and file relationship gives rise to a [tree like structure](https://en.wikipedia.org/wiki/Tree_(data_structure)). Since a file can not have files inside it (that's the job of a directory), the leaf nodes of the tree might be either files, or empty directories. Further, the internal nodes of the tree will be directories, with the root node of the tree being the root of the file system, hence the name.
+
+Let's say, the root has a directory inside it with the name "hello", and inside this directory, there is a file with the name "world". Path is a construct that allows us to relate an FS object with its location. So, the file's location in this case will be "/hello/world". The root has no name (empty string), and each level is separated by a `\`.
+
+{/* TODO: Talk about mount points here. */}
+
+{/*
+## Mnemofs
+
+Mnemofs is a file system built specifically to support NAND flashes for embedded systems using the Apache NuttX RTOS. Its components are: a superblock, a master node, a journal, an LRU, and a block allocator. These work in layers of abstraction, so I'll walk you through them one by one.
+ */}
+
+</div>
+
+---
+
+<Cards>
+<Card icon="❰&emsp;" title="Mnemofs Master Node" href={prev} />
+<Card icon="❱&emsp;" title="GSoC '24 @ Apache NuttX, End Evaluation Blog" href={next} />
+</Cards>
+<br/>
+<Card icon="⌂&emsp;" title="Home" href={home} />
