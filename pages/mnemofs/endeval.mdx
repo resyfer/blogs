@@ -113,6 +113,28 @@ Due to the peculiarities of NAND flashes, we do not want to "update" a page. To 
 
 Now, in its pure manner, Copy On Write cascades up to the root. Why? So, a file is updated by writing it in a new location. And the new location needs to be updated in its parent. Which again triggers CoW, and so on till it goes on upward in the FS tree till it reaches the local root (it might go on even further, but that's dependent on the rootfs).
 
+This illustration will explain it well:
+
+Let's assume the root (R) has a directory (A), which itself has a file (B).
+
+![og_state](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_400/v1724418681/mnemofs/q842zgczpqzj0basdwvo.png)
+
+Let's assume we've updated file B to B'. This is how the entire process goes (in CoW's pure manner):
+
+![next_state1](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_400/v1724418681/mnemofs/hn3udwd0notfmoyps0pb.png)
+
+Then the parent is updated as A'.
+
+![next_state2](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_400/v1724418681/mnemofs/twaurhfc3euszmqu0kvw.png)
+
+And then finally we go further up till we update the root R to R'.
+
+![next_state3](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_400/v1724418681/mnemofs/cmlateo0fyco1lz8ldfz.png)
+
+Then the old allocation are ready to be deleted.
+
+![final_state](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_400/v1724418681/mnemofs/n8uczl70aiyr0qovx3sl.png)
+
 For even one byte this goes up to the local root. A lot of writing for one byte right? Remember, the garbage left by CoW, ie. the pages that are old (and their data have been moved to another location), needs to be cleared when the page is to be used again. Mnemofs has measures to help mitigate this.
 
 Also, file update seems to take a lot of memory if we have to copy the entire thing in memory, make updates, and save it to a new location right? Especially for large files? Well, we have measures to mitigate this as well.
