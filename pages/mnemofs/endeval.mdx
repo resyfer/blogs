@@ -213,6 +213,10 @@ This also saves from updating the parent immediately, since it doesn't need to b
 
 The journal is a singly linked list made out of entire blocks, and each log and its checksum take up an entire page (for now). After the journal is full or above a certain limit, it will be flushed to empty it, but we'll discuss this later.
 
+But, in a traditional linked list, each node has the pointer to the next node. However, we've established that journal logs are one page in size. Also, the smallest writable size is a page. Since we're preallocating the journal blocks, we need a place to store their location. Traditional way would lead to a lot of wastage of space. Thus, the journal starts with a unique magic sequence, followed by the number of blocks it has (excluding master blocks), and then writes an array of all block numbers of blocks in the journal.
+
+![journal](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_800/v1724438259/mnemofs/sfwgznglq1bxym1vhojp.png)
+
 ### Master Node and Journal Flushing
 
 Mnemofs has a component called a master node. This master node basically points to the root of the file system. This allows the root to be treated like any other file as far as space allocation goes.
@@ -232,6 +236,8 @@ Well, first of all, my naming sense is bad. It's the Least Recently Used Cache. 
 Why doesn't it provide any benefit of being a cache? Well, we need to discuss what it does first. The LRU's job is to effectively store all the changes a user requests in memory. Then, say for a single file, when a lot of these changes have been stored, they are applied to the flash **together**. So, let's say we wait for `n` operations from the user before emptying the changes of a file stored in LRU. That would mark it as **one** operation to the flash for **every** `n` operations. We can have the entire size of the LRU to be configurable, to allow users to pick their own sweet balance between memory consumption and flash wear reduction.
 
 We still haven't answered the initial question yet. But before that, we _also_ need to look into the structure of the LRU. The LRU is made out of something called a [kernel list](https://kernelnewbies.org/FAQ/LinkedLists). For the uninterest people, it's simply a clever way to write circular doubly linked lists. The kernel list in LRU contains several **nodes**. Each node represents an FS object, be it a file or a directory. Now, each node itself has a kernel list as well. This list is made out of what mnemofs calls **deltas**. Each delta is an operation by the user. To the person who takes pain to understand the VFS methods, it is clear that the VFS methods, at their base, deal with some fundamental operations on FS objects. Namely, either reading, updating (and writing), or deleting some bytes.
+
+![lru](https://res.cloudinary.com/dbzi2yvvc/image/upload/c_fill,w_800/v1724437278/mnemofs/yuq3rpo3gx73kkov8dgh.png)
 
 Mnemofs has some further restrictions on this, to allow the usage of this LRU to be a bit simpler. When it comes to updating, VFS methods can ask you to put `m` bytes in place of `n` bytes. However, the way mnemofs works, we force this to follow the condition `m == n` (we'll discuss about this a bit later). If you're writing to a file, it will be replacing `n` bytes of 0-byte filled data, with `n` bytes of actual data, and so on. And then there's the delete operation, where we remove `n` bytes of data. Both operations start at a specific offset, which menmofs calls a "data offset" (as it's offset inside the data stored in the CTZ lists).
 
