@@ -1,0 +1,294 @@
+<div style={{textAlign: "justify"}}>
+# Blinky LED from Scratch
+
+There are a lot of libraries that allow you to write code from a very abstracted perspective. There's STM's own library (can be found on GitHub, or through their code generation tool STM32CubeMX), and then there's also `libopencm3` for Cortex-M CPUs.
+
+All work excellently. No doubt. But, as they are libraries, they abstract away the internals. It doesn't answer the question: What if you were to start writing ARM assembly directly? How would you “push” the code to the chip? How will it run it? What if I want to make an OS for ARM without the use of external libraries, and want to test it on my device?
+
+The root of the questions like this and other similar queries are answered here.
+
+## Blinky LED C program
+
+First, we'll be creating a blinky LED C program. The target board is a STM32 Nucleo F446RE. For other STM32 boards, the only things that would differ are memory addresses. For other microcontrollers, the main logic would remain the same, but the implementation might differ. Please refer the reference manual of the microcontroller for details.
+
+For reference, the green LED present on this Nucleo board is called LD2 and is mapped to Port 5 of GPIO A (`PA_5`).
+
+## RCC Clock Enable
+
+GPIOA (and other GPIO ports) have their memory mapped to AHB1 (Advanced High-performance Bus) according to the memory map in the reference manual. The (System) Reset and Clock Control (RCC) register group has a particular register that is of interest here called `RCC_AHB1ENR`, which controls the status of the clock for AHB1. The bit 0 of this register is for GPIOA and is called `GPIOAEN`. We need to enable this to allow the GPIOA to have a clock. In other words, we are enabling GPIOA itself.
+
+The address range for RCC according to the memory map table in the reference manual is `0x40023800` to `0x40023BFF`. Further, the `RCC_AHB1ENR` has an offset of `0x30`, which means it’s at `0x40023830`. We have to enable the bit `0` of it. Bit `0` in ARM means the Least Significant Bit (LSB).
+
+Setting up the addresses:
+
+```c
+#include <stdint.h> // Required for uint32_t
+
+#define RCC_BASE_ADDR   0x40023800
+#define RCC_AHB1ENR     (*(volatile uint32_t *)(RCC_BASE_ADDR + 0x30))
+```
+
+Enabling it:
+
+```c
+int main() {
+// ...
+  RCC_AHB1ENR |= (1 << 0);
+// ...
+}
+```
+
+### C Basics
+
+First, a number starting with `0x` is a hex number.
+
+Second, the pointer stores the memory address like `uint32_t *p = 0x40023830;`, and hence when we want to read/write something to a particular memory address, we use a pointer to it to do the operation. As simple as `*p = value;` or `int x = *p;`.
+
+Third, the compiler likes to optimize a lot of things, ESPECIALLY hard-coded numbers. If you try to do:
+
+```c
+int main() {
+// ...
+  uint32_t *p = 0x40023830;
+  int x = *p;
+// ...
+}
+```
+
+The compiler tries to optimize a lot of things. It will try to optimize this piece of code as well. We don’t want that, even if “optimized” sounds better.
+
+The thing is, the value stored in the location pointed by the compiler can update in various mysterious ways that’s dependent on your use-case. Writing to a memory location may have a side-effect outside of your program, eg. blinking an LED (ie. outputting something from PA_5).
+
+The compiler doesn’t know this. It just knows how you’re using the pointer - a variable - inside the program itself. It doesn’t seem to be doing anything useful, according to the compiler. No printing it to screen, no way you’re actually even using the pointer other than reading a value from it. The compiler can consider the variable useless, and remove it all together. Worse, it can try to cache the values. So your memory might be updated by something else (for example, I/O), and you might still get old values.
+
+Optimizations of this kind are prevented by using the `volatile` keyword.
+
+Fourth, to set a bit at position i (0-indexing) in a number (preferably unsigned) `n`, we need to do `n = n | (1 << i)`, or `n |= (1 << i)`.
+
+Fifth, to reset a bit at position `i` (0-indexing) in a number n, we need to do `n &= ~(1 << i)`.
+
+## GPIO Registers
+
+### GPIO Mode Register
+
+According to STM32 reference manual for the target board, the GPIO Mode Registers (`GPIOx_MODER`) decide the mode the particular pin is operating in. It also states that, for enabling output mode, we need to write 0b01 to the register corresponding to `PA_5`.
+
+The reference manual states that the GPIOA base address in AHB1 is `0x40020000` and the offset for `GPIOA_MODER` is `0x0`, which makes it `0x40020000`. Each pin has 2 bits for itself, and `PA_5` has bits 10 & 11 for itself.
+
+First we declare the addresses:
+```c
+#define GPIOA_BASE_ADDR 0x40020000
+#define GPIOA_MODER     (*(volatile uint32_t *)(GPIOA_BASE_ADDR + 0x00))
+```
+
+Then we reset the 10th and 11th bits, and set them as `0b01`:
+```c
+int main() {
+// ...
+    GPIOA_MODER &= ~(0x3 << (2 * 5)); // 0x3 is 0b11, and we're negating to reset bits
+    GPIOA_MODER |= (0x1 << (2 * 5));
+// ...
+}
+```
+
+### GPIO Output Data Register
+
+The register `GPIOA_ODR` is responsible for holding the bits for outputting HIGH (1) or LOW (0) through the various pins. By a similar method as `GPIOA_MODER`, the address for GPIOA_ODR comes out as `0x40020014`, and the bit at position `5` is responsible for PA_5.
+
+Thus, turning LD2 (PA_5) ON and OFF:
+```c
+int main() {
+  // ...
+  GPIOA_ODR |= (1 << 5);
+  // ...
+}
+```
+
+A toggling can be used instead (default state is `0`) like: `GPIOA_ODR ^= (1 << 5);`
+
+## Delay
+
+A delay can be introduced like:
+```c
+int main() {
+// ...
+    for (volatile uint32_t i = 0; i < 100000; i++) { 
+        // Simple delay loop
+    }
+// ...
+}
+```
+
+We don’t have to worry about the loop being optimized (and removed), even if technically it’s not doing anything, as we’re using `volatile` for `i`.
+
+## Vector Table
+
+Vector table is a table that is supposed to be at the start of the flash memory. Without the vector table, the program will not even start executing, so it is arguably the most important part of this process. The vector table needs to be loaded at the start of the flash and it has some important pieces of information that is read by the CPU.
+
+Since it needs to be at a particular address, the linker comes into play. We reserve a custom section called `.vectors`, which is kept at the start. It’s supposed to be part of `.text`, so we keep it like this here. It can also be kept in a separate section.
+
+```
+SECTIONS
+{
+	.text : {
+		*(.vectors)	/* Vector table */
+		*(.text*)	/* Program code */
+		/* ... */
+	} > FLASH
+	/* ... */
+}
+```
+
+In the C code, we’ll attach the `__attribute__ ((section(".vectors")))` attribute to the vector table that we define, so that linker put that in the required location.
+
+The vector table contains addresses for handlers that will handle exceptions, interrupts, etc. Since these don’t contain the exact handler itself, just its pointer, the handler can be customized.
+
+Usually libraries will use a `__attribute__ ((weak))` with their default implementations in case the programmer wants to customize it.
+
+### Stack Pointer
+
+In the ARM Cortex-M4 reference manual, it’s mentioned that the 32-bit value stored at `0x00000000` is read into the stack pointer at reset.
+
+We need the value of the address of the start of stack pointer from the linker script:
+
+```
+PROVIDE(_stack = ORIGIN(SRAM) + LENGTH(SRAM));
+```
+
+__The stack grows downward.__
+
+__NOTE: Linker has it’s own way of writing a symbol table using variable’s values as their addresses. So &\_stack will give you the value of the address you’re looking for.__
+
+### Reset
+
+The address which will be loaded for reset is kept at `0x00000004` and is a 32-bit value.
+
+### Others
+
+There are other important exception handlers like NMI handler, Memory management fault, etc. followed by the Interrupt Request (IRQ) handlers, all of which can be customized. Theoretically, the IRQ does not have any limit to the number of handlers it has. It can be programmed to have as many as the programmer likes. The reset address is recommended to start right after the table ends.
+
+__NOTE: The addresses have to be 4-aligned. If the space taken is less (like in the case of .text section) then the linker script needs to tell the linker to align to the nearest greater multiple of 4.__
+
+### Final Vector Table
+
+```c
+__attribute__ ((section(".vectors"))) void *vectors[] = {
+    &_stack,
+    &main,
+};
+```
+
+Except the first entry, all the others are function pointers (for handlers), and here the reset handler is simply `main`. This means that the entry point of the processor indirectly will be main. A lot of the times, you want a reset handler which will copy data from flash to RAM, set up BSS to 0, some CPU-specific prerequisites, and call main inside it.
+
+A lot of implementations of the vector table are of the form of struct, but as this is minimal and not built for maintainability and readability, an array would suffice.
+
+## Flashing
+
+A cross compiler can be used to convert the program into an ELF and a binary (I have a document on cross compilation, so this will be short).
+
+The full program:
+
+```c
+#include <stdint.h>
+
+#define RCC_BASE_ADDR   0x40023800
+#define GPIOA_BASE_ADDR 0x40020000
+
+#define RCC_AHB1ENR     (*(volatile uint32_t *)(RCC_BASE_ADDR + 0x30))
+#define GPIOA_MODER     (*(volatile uint32_t *)(GPIOA_BASE_ADDR + 0x00))
+#define GPIOA_ODR       (*(volatile uint32_t *)(GPIOA_BASE_ADDR + 0x14))
+
+void delay() {
+    for (volatile uint32_t i = 0; i < 500000; i++);
+}
+
+int main() {
+    RCC_AHB1ENR |= (1 << 0); 
+
+    GPIOA_MODER &= ~(0x3 << (2 * 5));
+    GPIOA_MODER |= (0x1 << (2 * 5));
+
+    while (1) {
+        GPIOA_ODR |= (1 << 5);
+        delay();
+        GPIOA_ODR &= ~(1 << 5);
+        delay();
+    }
+
+    return 0; 
+}
+
+extern uint32_t _stack;
+__attribute__ ((section(".vectors"))) void *vectors[] = {
+    &_stack,
+    &main,
+};
+```
+
+__The linker file is the most important file apart from your program, as it will make the difference between running and not running your program on your device.__ The linker script used is mentioned below:
+
+```
+MEMORY
+{
+	FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 128K
+	SRAM (rw) : ORIGIN = 0x20000000, LENGTH = 20K
+}
+
+ENTRY(main)
+
+SECTIONS
+{
+    _stext_ = .;
+	.text : {
+		*(.vectors)	/* Vector table */
+		*(.text*)	/* Program code */
+		. = ALIGN(4);
+		*(.rodata*)	/* Read-only data */
+		. = ALIGN(4);
+	} >FLASH
+    _etext_ = .;
+
+    _sdata_ = .;
+	.data : {
+		_data = .;
+		*(.data*)	/* Read-write initialized data */
+		. = ALIGN(4);
+		_edata = .;
+	} >FLASH AT >SRAM
+    _edata_ = .;
+
+    _sbss_ = .;
+	.bss : {
+		*(.bss*)	/* Read-write zero initialized data */
+		. = ALIGN(4);
+		_ebss = .;
+	} >SRAM
+    _ebss_ = .;
+
+	. = ALIGN(4);
+	_estack = .;
+}
+
+PROVIDE(_stack = ORIGIN(SRAM) + LENGTH(SRAM));
+```
+
+__NOTE: C++ is annoying unlike C, and needs some extra memory sections to be present in the linker script.__
+
+```sh
+arm-none-eabi-gcc -g -S -mcpu=cortex-m4 -mthumb -mfloat-abi=hard main.c -o main.s
+arm-none-eabi-as -g -mcpu=cortex-m4 -mthumb -mfloat-abi=hard main.s -o main.o
+arm-none-eabi-ld -g -T link.ld main.o -o main.elf
+arm-none-eabi-objcopy -O binary main.elf main.bin
+```
+
+__NOTE: Not all the commands above are needed, the first three can be clubbed together into `arm-none-eabi-gcc`, but they're shown separate to know the internals.__
+
+Then connect the STLINK/V2-1 programmer/debugger with the board. In the case of the Nucleo target board, I just have to connect it through mini-USB, as the board has the programmer built-in.
+
+```sh
+st-flash write main.bin 0x08000000
+```
+
+Debugging the application while it’s executing on the board is a different task altogether.
+
+</div>
