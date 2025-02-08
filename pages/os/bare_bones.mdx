@@ -1,0 +1,507 @@
+import { Cards, Card } from 'nextra/components'
+
+export let prev = "/os/os";
+export let home = "/";
+export let next = "/coming_soon";
+
+<div style={{textAlign: "justify"}}>
+# Bare Bones OS
+
+## OVMF
+
+I need `OVMF.fd` to use UEFI for emulation or virtual machines. Virtual Box does not need it. There is a `edk2-ovmf-git` on Arch AUR.
+
+I got `OVMF.fd` through [2][3]. Traditional OSes like Windows and Linux already have a large section of their codebase dedicated to system's device discovery and device configuration, and do not benefit from UEFI much, and only use it to start the environment they will run in. Individual devs would benefit from UEFI.
+
+UEFI applications are in PE32/PE32+ (for 64-bit) format, which is basically Windows EXE/DLL without symbol tables. UEFI should be utilised well, and the OS should not be in a hurry to leave “UEFI-land”. POSIX-UEFI [4] allows writing UEFI applications with a `libc`-like API.
+
+Adding UEFI to an application:
+```sh
+git clone https://gitlab.com/bztsrc/posix-uefi.git
+cd <your project>
+ln -s ../posix-uefi/uefi
+```
+
+**NOTE**: The above can be converted to a better format using git submodules.
+
+Using POSIX-UEFI:
+```c
+// main.c
+#include <uefi.h>
+int main (int argc, char **argv)
+{
+  printf("Hello, world!\n");
+  return 0;
+}
+```
+
+The `main.c` has to be at the root (or variables need to be defined to update this).
+```make
+# Makefile
+TARGET = helloworld.efi
+include uefi/Makefile
+```
+
+Using `uefi-run` to help create the UEFI image:
+```sh
+uefi-run -b ./boot/OVMF.fd helloworld.efi
+```
+
+This will start a VNC server.
+
+**NOTE**: More UEFI applications examples from [5].
+
+### NVRAM
+The configurations for UEFI on real hardware will be shown in a GUI and stored on an NVRAM chip to persist between reboots.
+
+The linux kernel has a module **efivars** to use manufacturer's convenience functions (that are loaded in RAM by the firmware) to list these variables and it can be visible in `/sys/firmware/efi/efivars`. UEFI has a shell program **bcfg** which works like Linux's **efibootmgr** to work with boot order NVRAM variables.
+
+### Bootable UEFI Applications
+In the boot device's /efi/boot path, there will be a `BOOTX64.efi` (for 64-bit applications) and is the default path and name for OVMF.
+
+Unlike a UEFI application launched from shell, if a bootable UEFI application returns, it will keep searching for other boot devices.
+
+### Types of Applications
+
+1. Applications
+    - OS Loaders and utils.
+    - These must load an OS or exit main function
+    - On exit of main function, the boot loader will look for other apps to load.
+2. Boot service drivers
+    - Drivers for booting eg. device drivers, network drivers, etc.
+3. Runtime drivers
+    - Drivers which stay loaded when OS loads and exits boot services.
+
+### Memory
+For the memory management functions in EFI, an OS is meant to be able to use "memory type" values above `0x80000000` for its own purposes.
+
+## ELF
+
+Executable and Linkable Format [6]. It's a format used by Linux and many UNIX-like OSes and is a standard format for executable files, object code, shared libraries, etc.
+
+It consists of:
+1. ELF Headers
+    a. Type
+    b. CPU Architecture
+    c. Virtual Address entry point
+    d. Size and offset of various parts
+    e. etc.
+2. Section header table
+    a. List of available segments and their attributes.
+    b. etc.
+3. Program header table
+    a. Describes every segment 
+
+`readelf` can help read an ELF file.
+
+### Cross Compilation
+Since our OS is not ready yet, it can not compile itself inside it. So we need to compile our OS inside another OS (like Linux), which is called cross-compilation. `i686-elf` is a generic ELF target (Linux ELF is only understood by Linux), and the `System V ABI` is well tested, so for now, they will suffice.
+
+## Multiboot Standard
+
+Multiboot standard [7] provides an easy interface between bootloaders like GRUB and the OS kernel. It contains a multiboot header which contains some “magic” values in global variables which the bootloader searches for.
+
+The `boot.s` will be done in assembly for now. The kernel needs to define a stack, and high level languages like C can not function without a stack, and thus can not be used for booting. The GNU doc linked above provides the multiboot specifications.
+
+**NOTE**: We will be using GRUB and BIOS, not UEFI, so no need for OVMF for emulation yet.
+
+### Multiboot Headers
+The first three 32-bit values it requires are magic (0x1BADB002), flags (bits `0-15` are requirements, `16-31` are optional), and a 32-bit checksum such that `checksum + magic + flags = 0` (by overflowing). According to the GNU doc, the required bits, if not understood by the bootloader, will result in failure to load OS image, while failure for the other bits would simply lead to ignoring them.
+
+The flag `1 << 0` is for ensuring modules are loaded at page boundaries (4KB), while `1<<1` ensures memory map is passed on to the kernel. `1<<2` ensures video mode table is available to the kernel, while `1<<16` are for when the kernel is a .o file instead of an ELF file.
+
+The `.align 4` is important to align everything to 4-bit boundaries, followed by actually placing the magic, flags and checksum values. The section can be named something like `.multiboot`, though it's not a requirement.
+
+
+```
+/* boot.s */
+
+.set MAGIC, 0x1BADB002 /* Magic number */
+.set FLAGS, (1 << 1 | 1 << 0) /* Flags for loading modules on page boundaries + memory map) */
+.set CHECKSUM, -(MAGIC + FLAGS) /* checksum + flags + magic = 0 */
+/* --- */
+.section .multiboot
+.align 4 /* 32-bit alignment */
+.long MAGIC
+.long FLAGS
+.long CHECKSUM
+```
+
+### Stack Pointer
+We can create a stack, as the standard does not define the value of the stack pointer variable (`esp` in `x86`), and it's up to the kernel to provide a stack. In `x86`, the stack grows downward (from higher memory to lower memory), so the stack top is a required value (used later). The variables for stack top and bottom can be put into something like the `.bss`.
+
+```
+.section .bss
+.align 16
+stack_bottom:
+.skip 16384
+stack_top:
+```
+
+This gives a `16-bit` aligned stack bottom and stack top, and thus the size of the stack is `16384 bytes`, which is `16 KiB`. The System V ABI requires the stack to be 16-bit in alignment, and we're using System V ABI, so we need to follow that.
+
+### Entry Point
+The linker script we will write later provides `_start` as the entry point, and the bootloader will jump to this position once the kernel is loaded and start executing from there. The GNU doc also mentions various registers like `EAX`, `EBX`, `CS`, `ESP`, etc. and what their values should be when the bootloader invokes the `32-bit` operating system.
+
+The `ESP` register needs the top of the stack (since in `x86`, stack grows downwards, ie. from higher to lower memory address). The kernel's main function kernel needs to be called then, and then needs to go into an infinite loop.
+
+```
+_start:
+    mov $stack_top, %esp
+    /*<< Initialize the other processor features here >>*/
+    call kernel
+1:  hlt
+    jmp 1b
+```
+
+A very useful instruction is `cli` right after calling the kernel, which disables interrupts, but they are disabled already by the bootloader, so not required.
+
+The `hlt` will lock up the computer as interrupts are disabled, and jmp 1b is to jump to the `hlt` instruction in the case the CPU wakes up from the lock up because of a non-maskable interrupt or system management mode.
+
+### Size
+Finally, setting size of `_start`, which is not required, but is useful for debugging and tracing:
+```
+.size _start, . - _start
+```
+
+### Overall Assembly
+
+```c
+/* boot.s */
+
+.set MAGIC, 0x1BADB002 /* Magic number */
+.set FLAGS, (1 << 1 | 1 << 0) /* Flags for loading modules on page boundaries + memory map */
+.set CHECKSUM, -(MAGIC + FLAGS) /* checksum + flags + magic = 0 */
+
+.section .multiboot
+.align 4
+.long MAGIC
+.long FLAGS
+.long CHECKSUM
+
+.section .bss
+.align 16
+stack_bottom:
+.skip 16384
+stack_top:
+
+.section .text
+.global _start
+.type _start, @function
+_start:
+        mov $stack_top, %esp
+        call kernel
+1:      hlt
+        jmp 1b
+.size _start, . - _start
+```
+
+## Freestanding Environments
+Applications written in something like C for userspace are for hosted environments. These environments provide a C standard library, and a lot of utility functions.
+
+These can not be used to write a kernel, as the kernel is a freestanding environment. However, some header files that look like part of C standard library are actually from the compiler itself, and thus can be used in freestanding applications like `stdbool.h`, `stddef.h`, `stdint.h`, `float.h`, `iso646.h`, `limits.h`, and `stdarg.h`, etc.
+
+## Kernel
+UEFI supports pixel buffers. To write text on screen, so each glyph has to be drawn by the kernel to show text on screen. This is what a font is, it is a bitmap that corresponds to pixels.
+
+**NOTE**: All Linux distros ship PC screen fonts. 
+
+Video Graphics Array (VGA) [8] is one of the memory-mapped I/Os. In most cases, it's limited to `80x25` characters (where 80 is the number of columns). This is also why Linux codebase has a limit of 80 columns. Technically, the buffer can be increased for devices which support it, but that's out of syllabus as VGA text mode is (along with GRUB) not supported on “newer” (non-fossilised) machines. VGA text buffer is located at `0xB8000`.
+
+Every element in the array has 2 parts to it. The 8 least significant bits represent the ASCII value of the item, while the rest of the bits are for how they appear on the screen. Thus every element is 16 bits, and the size of the VGA array becomes `4000 bytes`.
+
+|Bits|Meaning|
+|---|---|
+|15|Blink|
+|12-14|Background|
+|11|Bright bit|
+|8-10|Foreground|
+|0-7|ASCII|
+
+The bright bit when turned ON will lead to a lighter shade of the foreground.
+
+Thus, writing a character at a particular row and column is just writing a byte at that particular location in the buffer. Of course, an old technology like this won’t support more than ASCII. In a struct with bit fields, the earlier the element is, the lower significance of their bits. Thus an element in the VGA array can be described using:
+
+```c
+#include <stdint.h>
+#include <stdbool.h>
+
+#define VGA_BASE ((uintptr_t) 0xB8000)
+#define VGA_WIDTH_DEFAULT 80
+#define VGA_HEIGHT_DEFAULT 25
+
+enum vga_color
+{
+	VGA_COLOR_BLACK = 0,
+	VGA_COLOR_BLUE = 1,
+	VGA_COLOR_GREEN = 2,
+	VGA_COLOR_CYAN = 3,
+	VGA_COLOR_RED = 4,
+	VGA_COLOR_MAGENTA = 5,
+	VGA_COLOR_BROWN = 6,
+	VGA_COLOR_GREY = 7,
+};
+
+typedef struct
+{
+        char ch;
+        uint8_t fg: 3;
+        uint8_t bright: 1;
+        uint8_t bg: 3;
+        uint8_t blink: 1;
+} vga_elem_t;
+
+vga_elem_t *vga = (vga_elem_t *) VGA_BASE;
+```
+Also, we want to initialise an empty screen first:
+
+```c
+static void vga_init(void)
+{
+        uint8_t r = 0;
+        uint8_t c = 0;
+        int n = VGA_HEIGHT_DEFAULT * VGA_WIDTH_DEFAULT;
+        while(n--)
+                put_char('\0', &r, &c, VGA_COLOR_GREY,
+                        VGA_COLOR_BLUE, true, false, false);
+}
+```
+
+Finally:
+```c
+void kernel(void)
+{
+        uint8_t r = 0;
+        uint8_t c = 0;
+        vga_init();
+        puts("COCOS by resyfer\nHello World as well!!!", &r, &c);
+}
+```
+
+Thus entire `kernel.c`:
+```c
+#include <stdint.h>
+#include <stdbool.h>
+
+#define VGA_BASE ((uintptr_t) 0xB8000)
+#define VGA_WIDTH_DEFAULT 80
+#define VGA_HEIGHT_DEFAULT 25
+
+enum vga_color
+{
+	VGA_COLOR_BLACK = 0,
+	VGA_COLOR_BLUE = 1,
+	VGA_COLOR_GREEN = 2,
+	VGA_COLOR_CYAN = 3,
+	VGA_COLOR_RED = 4,
+	VGA_COLOR_MAGENTA = 5,
+	VGA_COLOR_BROWN = 6,
+	VGA_COLOR_GREY = 7,
+}; 
+
+typedef struct
+{
+        char ch;
+        uint8_t fg: 3;
+        uint8_t bright: 1;
+        uint8_t bg: 3;
+        uint8_t blink: 1;
+} vga_elem_t;
+
+vga_elem_t *vga = (vga_elem_t *) VGA_BASE;
+
+static void memcpy(void *dest, const void *src, uint32_t n)
+{
+        char *d = dest;
+        const char *s = src;
+        while (n--)
+                *d++ = *s++;
+}
+
+static void scroll_one_row(void)
+{
+        memcpy(vga,
+               vga + (1 * VGA_WIDTH_DEFAULT * sizeof(vga_elem_t)),
+               sizeof(vga_elem_t)
+                * VGA_WIDTH_DEFAULT
+                * (VGA_HEIGHT_DEFAULT - 1));
+}
+
+static void put_char(char ch, uint8_t *row, uint8_t *col,
+                     enum vga_color fg, enum vga_color bg,
+                     bool bright, bool blink, bool scroll)
+{
+        int idx;
+        if (scroll && *col == VGA_WIDTH_DEFAULT - 1 && *row == VGA_HEIGHT_DEFAULT - 1)
+        {
+                scroll_one_row();
+                *row = VGA_HEIGHT_DEFAULT - 2;
+                *col = 0;
+        }
+        idx = *row * VGA_WIDTH_DEFAULT + *col;
+        vga[idx] = (vga_elem_t) {ch, fg, bright, bg, blink};
+        (*col)++;
+        *row += *col / VGA_WIDTH_DEFAULT;
+        *col %= VGA_WIDTH_DEFAULT;
+}
+
+static void puts(const char* s, uint8_t *row, uint8_t *col)
+{
+        while(*s != '\0') {
+                if (*s == '\n') {
+                        (*row)++;
+                        if (*row == VGA_HEIGHT_DEFAULT) {
+                                scroll_one_row();
+                                (*row)--;
+                        }
+                        *col = 0;
+                } else if (*s == '\r') {
+                        *col = 0;
+                } else {
+                        put_char(*s, row, col, VGA_COLOR_GREY,
+                                VGA_COLOR_BLUE, true, false, true);
+                }
+                s++;
+        }
+}
+
+static void vga_init(void)
+{
+        uint8_t r = 0;
+        uint8_t c = 0;
+        int n = VGA_HEIGHT_DEFAULT * VGA_WIDTH_DEFAULT;
+        while(n--)
+                put_char('\0', &r, &c, VGA_COLOR_GREY,
+                        VGA_COLOR_BLUE, true, false, false);
+}
+
+void kernel(void)
+{
+        uint8_t r = 0;
+        uint8_t c = 0;
+        vga_init();
+        puts("COCOS by resyfer\nHello World as well!!!", &r, &c);
+}
+```
+
+## Linker
+The linker starts with mentioning the entry point of `boot.s`. We used the label `_start`:
+
+```
+ENTRY(_start)
+```
+
+Then we need to mention the various sections (added some in `boot.s` like `.multiboot` and `.bss` and `.text`) and where they need to be loaded.
+
+The `.text` section contains our code, and we want it to be loaded from the earliest location in RAM which will not cause any problems. BIOS and UEFI need some space at the start of RAM for various things. An example is the video memory for VGA used above. In BIOS, the address `0x100000` (`0x0 - 0xFFFFF` is 1MiB) of memory was almost guaranteed to be a safe location, but UEFI has complicated things (TODO), and apparently need some space for various firmware things, and thus 2MiB (linker scripts understand it as 2M) is generally a safe location. We also want the sections to be aligned with page boundaries.
+
+The linker script described by OSDev Wiki uses both `BLOCK` and `ALIGN` to align the sections to memory addresses of multiples of 4KiB (the page boundaries). They both resemble the same thing, and have been written for backwards compatibility, but `ALIGN` is preferred and that's what we will use (`BLOCK` and `ALIGN` in linker script).
+
+```c
+SECTIONS {
+        . = 2M;
+
+        .text: ALIGN(4K)
+        {
+			*(.multiboot)
+			*(.text)
+		}
+
+        .rodata: ALIGN(4K)
+		{
+			*(.rodata)
+		}
+
+        .data: ALIGN(4K)
+		{
+			*(.data)
+		}
+
+        .bss: ALIGN(4K)
+		{
+			*(COMMON)
+			*(.bss)
+		}
+}
+```
+
+These loading of these sections start at 2M location, then loads any `.text` sections and `.multiboot` sections in the section called .text, and ensures `.multiboot` is kept first so that the multiboot information appears at the start of the image.
+
+`.rodata` is read only data outside of text. Some people put this along with `.text` as well. Then .data contains the initialised global variables.
+
+According to *Computer Systems, 2nd Ed. by Bryant, O'Hallaron*, `.bss` contains uninitialised global variables while `.COMMON` contains uninitialised static data objects that are not yet allocated or global variables initialised to 0. But these later get bundled into the `.bss` section after the linker is done with it (since we compile these two into `.bss`).
+
+## Compiling
+
+`boot.s` (assuming it's inside a directory called `src`):
+```sh
+i686-elf-as src/boot.s -o build/boot.o
+```
+
+`kernel.c` (inside `src`):
+```sh
+i686-elf-gcc -c src/kernel.c -o build/kernel.o -std=c17 -ffreestanding -O2 -Wall -Wextra
+```
+
+Finally:
+```sh
+i686-elf-gcc -T linker.ld -o build/cocos.bin -ffreestanding -O2 -nostdlib build/kernel.o build/boot.o -lgcc
+```
+
+## GRUB
+To give grub more information, we can create a directory like:
+```
+iso
+└── boot
+    ├── cocos.bin
+    └── grub
+        └── grub.cfg
+```
+
+Here `cocos.bin` is the binary obtained above, and `grub.cfg` is as follows:
+```
+menuentry "cocos" {
+	multiboot /boot/cocos.bin
+}
+```
+To create the ISO, give the ISO directory name (`iso`) and the output ISO file:
+```
+grub-mkrescue -o cocos.iso iso
+```
+
+This will also load GRUB with it.
+
+## QEMU
+
+To run this:
+```
+qemu-system-i386 -cdrom build/cocos.iso
+```
+
+## Output
+
+![GRUB](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1738995095/os/kpm6s1mcqtiejflkqm8p.png)
+![OS](https://res.cloudinary.com/dbzi2yvvc/image/upload/v1738994826/os/c5pypxhrc3e5bsyldrd7.png)
+
+## References
+
+- [1] [Bare Bones OSDev Wiki](https://wiki.osdev.org/Bare_Bones)
+- [2] [OVMF](https://github.com/tianocore/tianocore.github.io/wiki/OVMF)
+- [3] [OVMF.fd](https://github.com/clearlinux/common/blob/master/OVMF.fd)
+- [4] [POSIX-UEFI](https://wiki.osdev.org/POSIX-UEFI)
+- [5] [POSIX-UEFI examples](https://gitlab.com/bztsrc/posix-uefi/-/tree/master/examples)
+- [6] [ELF64](https://0xax.gitbooks.io/linux-insides/content/Theory/linux-theory-2.html)
+- [7] [GNU Multiboot Specification](https://www.gnu.org/software/grub/manual/multiboot/multiboot.html)
+- [8] [VGA Text Mode](https://os.phil-opp.com/vga-text-mode/)
+- [9] [BLOCK and ALIGN in linker scripts](https://stackoverflow.com/questions/43686352/block-and-align-in-linker-script)
+
+</div>
+
+---
+
+<Cards>
+<Card icon="❰&emsp;" title="OS" href={prev} />
+<Card icon="❱&emsp;" title="Coming Soon" href={next} />
+</Cards>
+<br/>
+<Card icon="⌂&emsp;" title="Home" href={home} />
