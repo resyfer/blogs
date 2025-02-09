@@ -11,15 +11,12 @@ export let next = "/coming_soon";
 
 I need `OVMF.fd` to use UEFI for emulation or virtual machines. Virtual Box does not need it. There is a `edk2-ovmf-git` on Arch AUR.
 
-I got `OVMF.fd` through [2][3]. Traditional OSes like Windows and Linux already have a large section of their codebase dedicated to system's device discovery and device configuration, and do not benefit from UEFI much, and only use it to start the environment they will run in. Individual devs would benefit from UEFI.
-
-UEFI applications are in PE32/PE32+ (for 64-bit) format, which is basically Windows EXE/DLL without symbol tables. UEFI should be utilised well, and the OS should not be in a hurry to leave “UEFI-land”. POSIX-UEFI [4] allows writing UEFI applications with a `libc`-like API.
-
-Adding UEFI to an application:
-```sh
-git clone https://gitlab.com/bztsrc/posix-uefi.git
-cd <your project>
-ln -s ../posix-uefi/uefi
+I got `OVMF.fd` through (2)[3]. Traditional OSes like Windows and Linux already have a large section of their codebase dedicated to system's device discovery and device configuration, and do not benefit from UEFI much, and only use it to start the environment they will run in. Individual devs would benefit from UEF(3)
+UEFI applications are in PE32/PE32+ (for 64-bit) format, which is basically Windows EXE/DLL without symbol tables. UEFI should be utilised well, and the OS should not be in a hurry to leave “UEFI-land”. POSIX-UEFI [4] allows writing UEFI applications with a `libc`-like A(4(5)Adding UEFI to an application:
+``(6)
+gi(7)lone https://gitlab.com/bztsrc/posix-uefi.git
+cd(8)our project>
+ln(9) ../posix-uefi/uefi
 ```
 
 **NOTE**: The above can be converted to a better format using git submodules.
@@ -485,15 +482,15 @@ qemu-system-i386 -cdrom build/cocos.iso
 
 ## References
 
-- [1] [Bare Bones OSDev Wiki](https://wiki.osdev.org/Bare_Bones)
-- [2] [OVMF](https://github.com/tianocore/tianocore.github.io/wiki/OVMF)
-- [3] [OVMF.fd](https://github.com/clearlinux/common/blob/master/OVMF.fd)
-- [4] [POSIX-UEFI](https://wiki.osdev.org/POSIX-UEFI)
-- [5] [POSIX-UEFI examples](https://gitlab.com/bztsrc/posix-uefi/-/tree/master/examples)
-- [6] [ELF64](https://0xax.gitbooks.io/linux-insides/content/Theory/linux-theory-2.html)
-- [7] [GNU Multiboot Specification](https://www.gnu.org/software/grub/manual/multiboot/multiboot.html)
-- [8] [VGA Text Mode](https://os.phil-opp.com/vga-text-mode/)
-- [9] [BLOCK and ALIGN in linker scripts](https://stackoverflow.com/questions/43686352/block-and-align-in-linker-script)
+- (1) [Bare Bones OSDev Wiki](https://wiki.osdev.org/Bare_Bones)
+- (2) [OVMF](https://github.com/tianocore/tianocore.github.io/wiki/OVMF)
+- (3) [OVMF.fd](https://github.com/clearlinux/common/blob/master/OVMF.fd)
+- (4) [POSIX-UEFI](https://wiki.osdev.org/POSIX-UEFI)
+- (5) [POSIX-UEFI examples](https://gitlab.com/bztsrc/posix-uefi/-/tree/master/examples)
+- (6) [ELF64](https://0xax.gitbooks.io/linux-insides/content/Theory/linux-theory-2.html)
+- (7) [GNU Multiboot Specification](https://www.gnu.org/software/grub/manual/multiboot/multiboot.html)
+- (8) [VGA Text Mode](https://os.phil-opp.com/vga-text-mode/)
+- (9) [BLOCK and ALIGN in linker scripts](https://stackoverflow.com/questions/43686352/block-and-align-in-linker-script)
 
 </div>
 
