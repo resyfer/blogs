@@ -1,0 +1,452 @@
+# Interactive OS for RISC-V
+
+First up, a weird jump to RISCV after dabbling in x86? Yes, I liked RISC-V more, and saw a good potential.
+
+**NOTE**: It's _most definitely not_ because I find the assembly easier to write and debug :D. Probably.
+
+## Tools
+
+### Compiler
+
+The branch of compiler I used was `riscv32-unknown-elf-*`, and can be found on the AUR by the name `riscv-gnu-toolchain-bin`. Yes, use the precompiled binaries. No, don't compile it on your machine, unless it's a pretty good one, or you will be waiting for it to complete for a long time.
+
+Ensure you have `riscv32-unknown-elf-gdb` installed as well, you will need it later down the line for more complex tasks.
+
+### QEMU
+
+To emulate a RISC-V (R-V) 64 machine, I am going to use QEMU, specifically `qemu-system-riscv64`. The type of device we will use is the `VirtIO` device (virt...virtual, get it?)
+
+## Overview
+
+So, what we want to do is run a kernel, and it should take in our user input, and do some stuff, and output some stuff on the screen. The emphasis of this blog is the ability to take in user input and output something. And also maybe the ability to run on RISC-V hardware.
+
+## Details
+
+Getting into the details.
+
+### Kernel Code
+
+We want our entry point to be a simple `void kernel(void)`. We will write what our kernel does first, and then later, we will see how to actually make the (emulated) RISC-V processor start executing from here.
+
+### UART
+
+Universal Asynchronous Receiver Transmitter (UART) is a way for peripheral devices to communicate with the processor (or programs running on the processor in privileged mode). QEMU, our emulator, has a way for using UART for I/O. UART will help us send our keystrokes to our OS (through our R-V system), and help the OS "print" something. This is explained better right below this yapping.
+
+We will configure QEMU later, but UART, like most memory-mapped I/O devices, has a lot of registers that are accessible by the processor for controlling its functionality. How do you control the registers for controlling its functionality? Well, UART's registers contain data, which decides UART's functionality, and these registers can be written to, or read from, from certain memory locations. It's called memory-mapped I/O for a reason...the functionality is controlled through reads from or writes to specific memory locations.
+
+UART that QEMU uses implements the [16550 specifications](https://caro.su/msx/ocm_de1/16550.pdf). We'll use only the standard sections of the datasheet, as we want this OS to be as close to the standard specifications as possible. No vendor lock-in :D.
+
+#### UART registers.
+
+Two of UART's registers exist for holding read and write data respectively. The read data is input from the peripheral, and write data is output to the peripheral. The read register, Receiver Holding Register (RHR), holds the byte input from the peripheral that's read eventually by the processor (as long as the processor reads before new data comes in), and the write register, Transmitter Holding Register (THR), holds the byte output that will be sent to the peripheral (as long as it's sent before the processor writes a new value to it). UART registers are byte-long, and thus, it's byte-by-byte data transfer. There are ways to work with the overwrite problem that can be noticed above, but that's explained later.
+
+What QEMU does is connect your standard I/O to the system's monitor. What it means is that every character that you type in your console running QEMU will be sent to RHR, and can be read by the R-V processor. Also, every character that the processor writes to THR will be sent to your console, and displayed on to your console output.
+
+The base address for UART in QEMU is [`0x1000 0000`](https://github.com/qemu/qemu/blob/master/hw/riscv/virt.c#L94) and all the register offsets are from this base address.
+
+```c
+#define UART_BASE_ADDR (0x10000000)
+```
+
+#### Initializing UART registers
+
+First, the UART communication channel needs to be initialized. There are some registers that need certain values before you start using it.
+
+One of the functionalities we want to initialize is the ability to be able to know when the data in RHR is ready to be read (ie. the transmission from peripheral to the register is complete). For this, the Interrupt Enable Register (IER) needs to be configured to allow the **"Data Ready" interrupt**. The bit 0 of IER, when enabled, enables Data Ready interrupt. IER is at offset `0x1` from the base address.
+
+```c
+#define UART_IER ((volatile uint8_t *) UART_BASE_ADDR + 0x1)
+
+void
+uart_init() {
+    *UART_IER |= 0b00000001;
+}
+```
+
+or, in fancier ways:
+
+```c
+#define MM_PTR(x)               ((volatile uint8_t*)x)
+#define MM_PTR_OFF(base, off)   (base + off)
+#define UART_OFF(x)             MM_PTR_OFF(UART_BASE_ADDR, x)
+#define UART_IER                MM_PTR(UART_OFF(0x1))
+
+void
+uart_init() {
+    *UART_IER |= 0b00000001;
+}
+```
+
+Next, we want to deal with the overwrite problem. The easiest way is to use something which can store multiple values (like an array or similar) instead of one value. We also want the data stored first, to be read first. This behavior is First In First Out (FIFO), and is commonly called a queue. In UART there is a FIFO Control Register (FCR) where FIFO can be enabled. This is by setting bit 0 of FCR. FCR is located at `0x2` offset to the base address.
+
+How does the FIFO work with RHR and THR? Well, for you, no changes. If FIFO is enabled, access to RHR and THR will be from RHR FIFO and THR FIFO respectively instead.
+
+RHR and THR only differ in who is writing to it and who is reading from it. In RHR, the processor reads, peripheral writes. In THR, the processor writes, peripheral reads. RHR and THR will have separate FIFOs, and when a value is written to these FIFOs, the one reading will get the value from the front of the FIFO instead of the value from the register. This will will be then removed from the FIFO. Thus, when you try to read from RHR, the processor will read the front-most value in the FIFO. It might happen, that before the processor has attempted a read, the peripheral writes multiple values to the RHR FIFO, and the problem of overwriting is prevented. Similarly, your processor can write multiple values to the THR FIFO before your peripheral reads them, and due to the FIFO, the peripheral has a buffer to store values that come in between two different consecutive reads that it makes.
+
+```c
+#define UART_FCR MM_PTR(UART_OFF(0x2))
+
+void
+uart_init()
+{
+    // ...
+    *UART_FCR |= 0b00000001;
+}
+```
+
+Then, we want to set the size of the data being transmitted through the UART channel (in bits). The maximum size is one byte (8 bits), but we can set it lower if desired. We don't desire that, so we want it 8 bits. We do that from the Line Control Register (LCR). The bit 0 and bit 1 of LCR need to be set for the word size to be 8 bits (1 byte). FCR is at an offset of `0x3`.
+
+```c
+#define UART_LCR MM_PTR(UART_OFF(0x3))
+
+void
+uart_init()
+{
+    // ...
+    *UART_LCR |= 0b00000011;
+}
+```
+
+At this point, we're almost done with initialization, except mentioning the baud rate, which is the rate at which data is transferred between the peripheral and the device. This is not required in QEMU, and requires extra information (which might overwhelm you) so it's part of the foot note of the blog.
+
+#### UART I/O
+
+After the initialization it's pretty easy. RHR is at offset `0x0` and so is THR. The difference is that if you're reading from this address, you get RHR data (or rather, RHR FIFO data, since we enabled FIFO), and if you're writing to this address, you're writing to THR (or rather, THR FIFO).
+
+The write is pretty simple:
+```c
+void
+uart_write(const char* const buf, size_t buflen)
+{
+    for (size_t i = 0; i < buflen; i++) {
+        *UART_THR = buf[i];
+    }
+}
+```
+
+The read is _slightly_ more complicated. We need to know first if the data in RHR (or RHR FIFO) is ready. This means that the communication is over, and the data we read is the actual data that the peripheral sent. Data ready bit is the bit 0 of Line Status Register (LSR), which is a register present at offset `0x5`.
+
+**NOTE**: Data Ready bit in IER **enables** the Data Ready interrupt. Data Ready bit in LSR is the consequence of that interrupt. If set, the data is ready, and this is set by the interrupt.
+
+```c
+#define UART_LSR            MM_PTR(UART_OFF(0x5))
+#define GET_BIT(ptr, bit)   ((*ptr & (1 << bit)) != 0)
+
+static bool
+is_data_read()
+{
+	return GET_BIT(UART_LSR, 0); // Data Ready bit
+}
+```
+
+If data is ready, THEN we read the character.
+```c
+#define MM_PTR_RDONLY(x) ((volatile const uint8_t* const)x)
+#define UART_RHR MM_PTR_RDONLY(UART_OFF(0x0))
+
+void
+uart_getc(char* c)
+{
+    if (is_data_read()) {
+        *c = *UART_RHR;
+    } else {
+        *c = 0;
+    }
+}
+```
+
+When you type a character, QEMU will send the characters to the system, but you won't see what you typed on the screen. This can be helped by writing the character as well (when you read it). This will send your typed character back to the console, and your console program will be in charge of printing it. A _bit_ of a roundabout way to do this, but that's how it's done. Since every character you type gets sent to your console, this indirectly is exactly like you are typing directly in your console without QEMU running in it. The characters include backspace, left arrow, right arrow, delete, etc. Under normal circumstances as well, the console gets the ASCII values you type, or the values the executing program prints to stdout, and this is the same here as well.
+
+Now, `uart_getc` will give us the character we type, then we can store it in a buffer as requested by a caller. But here's the problem, when does our OS stop putting the characters in the buffer? Usually, a "space" or "enter" should give the cue that we want it to stop reading. To simplify it, we just choose to stop at "enter". I say simplify, but "enter" is pretty complex as well. As far as my keyboard and terminal go, pressing "Enter" will give a carriage return (`\r` or 13 in ASCII). A carriage return will lead to the cursor jumping to the start of the same line, not the start of the line below as you would expect with an "enter". So I need some small extra code to convert a `\r` to a `\n` so that your console.
+
+If the character received is 0, then it means that the data is not ready, and to retry.
+
+```c
+size_t
+uart_read(char* const buf, size_t buflen)
+{
+    size_t i = 0;
+    char c = 0;
+
+    while (i < buflen) {
+       	uart_getc(&c);
+
+       	if (c == 0) {
+            continue;
+       	}
+
+       	if (c == '\r' || c == '\n') {
+            c = '\n';
+            uart_write(&c, 1);
+            break;
+       	}
+
+       	uart_write(&c, 1);
+       	buf[i++] = c;
+       	c = 0;
+    }
+
+    return i;
+}
+```
+
+**NOTE**: UART just sends the 8-bit integer value of the character, so it's upto you how you want to interpret it. It's easiest to use ASCII for english-based keyboards. However, using UTF-8 symbols might cause multiple bytes to be sent which only TOGETHER make sense instead of separately. UTF-8 uses variable length encoding, and ASCII is a subset of UTF-8. ASCII characters in UTF-8 remain unchanged in value, and take up one byte as well.
+
+### Kernel program
+
+Our kernel will basically take in the input from the user, and then will check if the input is even or odd. The logic doesn't really matter, but taking in input does and writing output does.
+
+```c
+void
+kernel(void)
+{
+    uart_init();
+    uart_write("hello world\nfrom kernel\n", 24);
+
+    char rd[20] = { 0 };
+    uart_write("No > ", 5);
+    while (true) {
+        size_t sz = uart_read(rd, 20);
+
+        if (sz == 0) {
+        uart_write("Quitting kernel. Bye\n", 21);
+        return;
+    }
+
+    if ((rd[sz - 1] - '0') % 2 == 0) {
+        uart_write("Even from kernel\nNo > ", 22);
+    } else {
+        uart_write("Odd from kernel\nNo > ", 21);
+    }
+
+    for (int i = 0; i < 20; i++)
+        rd[0] = 0;
+    }
+}
+```
+
+## RISC-V Boot Process
+
+As much as I would love the RISC-V processor to telepathically know where our kernel starts from (the function `kernel`), we need to write some assembly to set up an environment to run C programs. The entry point of this assembly is the boot entry point, and is historically known as `_start`. We will see how to start the boot process from `_start` after writing what `_start` does.
+
+Firstly, in multicore systems, we want to check if the Machine Hardware Thread ID (`mhartid`) which is running our boot process is 0, which is the value if we're running from Core 0 of the processor and hardware thread (hart) is 0. We get this value from R-V's Control and Status Register (CSR) using the instruction `csrr`. If we are not, then we just loop infinitely (which is our version of purgatory, and you never get back from that place, unless you shutdown or reboot). Wait For Interrupt instruction (`wfi`) allows us to save our energy in purgatory by stopping till we get any kind of interrupt.
+
+```asm
+_start:
+    csrr a0, mhartid
+    bnez a0, loop
+
+loop:
+    wfi
+    j loop
+```
+
+Then we want to ensure our stack pointer is initialized. We can create an empty space using `.skip`, which is a compiler directive instead of an actual instruction. Lines starting with `.` are compiler directives, which are instructions for compiler, rather than instructions for the CPU to execute. The stack grows down (ie. from higher memory addresses, to lower memory addresses), and thus the stack pointer points to the end of the stack, which is the memory address right after the highest memory address that belongs to the stack. The register `sp` has the stack pointer. If the stack is from [x, y] inclusive of both, where `y` is `y > x`, then `sp` needs to be `y + 1`. We can take our stack to be of 8192 bytes.
+
+```asm
+.equ STACK_SIZE, 8192
+_start:
+    # ...
+    la   sp, stack + STACK_SIZE
+    # ...
+# ...
+stack:
+    .skip STACK_SIZE
+    # <- End of Stack (sp)
+```
+
+After initializing the stack pointer, the processor should jump to the kernel. Since our kernel's entry point is the function `kernel`, we can:
+
+```asm
+_start:
+    # ...
+    j    kernel
+```
+
+As mentioned above, I want this `_start` to be the entry point. This is done with the help of the linker, which is the thing that decide what code resides where in the binary it creates.
+
+Later on, we will create a section called `.text.init` for the linker to use to put stuff at the start of the binary. For now, we will just use it, trusting our future selves to create this section out of thin air. In order for us to tell the linker what code belongs to a section, we have to specify it in code using compiler directives. In assembly, we do this by using the `.section` compiler directive. We also use `.global` directive to allow `_start` to be accessible by other object files (we don't need it here, just for historical context).
+
+```asm
+.section .text.init
+.global _start
+_start:
+    # ...
+```
+
+Finally, all the assembly in one place:
+```asm
+.equ STACK_SIZE, 8192
+
+.section .text.init
+.global _start
+_start:
+    csrr a0, mhartid
+    bnez a0, park 			       # We boot OS on Hart 0
+    la   sp, stack + STACK_SIZE
+    j    kernel
+
+loop:
+    wfi
+    j loop
+
+stack:
+    .skip STACK_SIZE
+    # <- End of Stack (sp)
+```
+
+## Linking the binary
+
+The linker needs to specify what part of the code loads to what place in the RAM on startup. In priviledged mode, it's the actual RAM, and not virtual memory.
+
+The DRAM in QEMU starts from the physical memory address [`0x8000 0000`](https://github.com/qemu/qemu/blob/master/hw/riscv/virt.c#L102) in the `virtio` machine mode and execution starts from the start of DRAM in this mode. We can use a RAM of size 128 MiB (we configure it in QEMU). We might have some implicit sections defined, and some explicit ones (like the `.text.init`). To "create" a section, we just have to use it with a compiler directive. So above, where we used `.text.init`, it also "created" it.
+
+Also, we have 3 different types of (program) headers...text, data and bss. `text` is for the read-only code (including string literals). `data` is for (read-only) constants. And, `bss` is for non-constant global variables.
+
+First we mention our entry point is `_start` (entry to our assembly):
+
+```ld
+ENTRY( _start )
+```
+
+then we mention our memory sections and headers.
+
+```ld
+MEMORY
+{
+    RAM(wxa) : ORIGIN = 0x80000000, LENGTH = 128M
+}
+
+PHDRS
+{
+  text PT_LOAD;
+  data PT_LOAD;
+  bss PT_LOAD;
+}
+```
+
+Then we mention the program headers in which they are grouped and the memory section it gets loaded at (hint: there is only one option).
+
+```ld
+SECTIONS {
+    .text : {
+        *(.text.init)
+        *(.text .text.*)
+    } >RAM :text
+
+    .rodata : {
+        *(.rodata .rodata.*)
+    } >RAM :data
+
+    .bss : {
+        *(.sbss .sbss.*)
+        *(.bss .bss.*)
+    } >RAM :bss
+}
+```
+
+The `.text.init` at the start of `.text` ensures it's at the start of the code, thus our `_start` gets put at the start of the RAM, which is `0x8000 0000`. An additional task is to reset the BSS area, which will be shown in foot note.
+
+## Compiling
+
+C code:
+```sh
+riscv64-unknown-elf-gcc \
+    -c <output_file> \
+    -o <code_file> \
+    -O2 -g -std=c23 \
+    -mcmodel=medany -Wall -Wextra -ffreestanding \
+    -nostdlib -Iinclude -nostartfiles
+```
+
+This allows us to use the latest and greatest C23, and -mcmodel=medany helps with read-only data being "too far away" (don't worry about it).
+
+ASM code:
+```sh
+riscv64-unknown-elf-asm <output_file> -o <code_file>
+```
+
+Finally, linking:
+```sh
+riscv64-unknown-elf-gcc \
+    -T <linker_file> \
+    -O2 -g -std=c23 \
+    -mcmodel=medany -Wall -Wextra -ffreestanding \
+    -nostdlib -Iinclude -nostartfiles \
+    -o <output_file_name>.bin \
+    <space_separated_input_files>
+```
+You can directly use `riscv64-unknown-elf-ld` but GCC will pass it along just fine.
+
+Running with QEMU:
+
+```sh
+qemu-system-riscv64 \
+    -machine virt \
+		-cpu rv64 \
+		-smp 4 \
+		-m 128M \
+		-drive if=none,format=raw,file=$(HDD_FILE),id=foo \
+		-device virtio-blk-device,drive=foo \
+		-nographic \
+		-serial mon:stdio \
+		-bios none \
+		-device virtio-rng-device \
+		-device virtio-net-device \
+		-device virtio-tablet-device \
+		-device virtio-keyboard-device \
+		-kernel <output_binary_file>
+```
+
+## Foot Note
+
+### Setting Baud Rate
+
+The Baud Rate divisor is a 16-bit value that is set by setting Data Latch Least (DLL) and Data Latch Most (DLM) registers which store the 8 least and most significant values respectively. These are located at `0x0` and `0x1` respectively. These conflict with some other registers, and the way we tell UART to access these is by setting the Divisor Latch Access Bit (DLAB) (bit 7) of LCR.
+
+```c
+static void
+set_baudrate_div(uint16_t div)
+{
+	SET(UART_LCR, 7); // Set DLAB
+
+	*UART_DLM = div >> 8;
+	*UART_DLL = div & BITMASK_LOWER_N(8);
+
+	UNSET(UART_LCR, 7); // Set DLAB // Unset DLAB
+}
+```
+
+According to the specification, the divisor (`div`) can be calculated by `div = ceil(UART_CLK_HZ / (16 * UART_BAUD_RATE))` which calculates to be `592` for QEMU as the global clock rate is `22.729 MHz`.
+
+### Resetting BSS
+
+Variables can be added into the linker script and can be used by the C program (or assembly). One way to use these is to reset the entire BSS area.
+
+```ld
+/* ... */
+    .bss : {
+        PROVIDE(_sbss = .);
+        *(.sbss .sbss.*)
+        *(.bss .bss.*)
+        PROVIDE(_ebss = .);
+    } >RAM :bss
+/* ... */
+```
+
+Linker variables are slightly weird, due to the way the symbol tables differ in linker table. `_sbss` is one such variable the linker file exposes that we can use in C file. Normally, we use `extern data_type_t my_variable` and using it normally like a variable will give us the value stored in it. However, the value we associate with a linker variable is actually the **memory address** of that variable due to the symbol table of the linker.
+
+```c
+extern uint8_t _sbss;
+extern uint8_t _ebss;
+
+void clear_bss(void) {
+    uint8_t *bss_start = &_sbss;
+    uint8_t *bss_end = &_ebss;
+
+    for (uint8_t *ptr = bss_start; ptr < bss_end; ptr++)
+        *ptr = 0;
+}
+```
+
+This can be done in assembly right before jumping to `kernel` as well, but it's easier in C, and we can jump to `clear_bss` right before jumping the `kernel` (the compiled assembly will return back to the boot assembly after `clear_bss` is completed).
